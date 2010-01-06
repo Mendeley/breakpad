@@ -14,7 +14,23 @@ if(WIN32)
 	)
 	add_library(breakpad ${CLIENT_LIB_SRCS})
 elseif(APPLE)
-	# TODO - Mac build system
+	set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/mac)
+	include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/mac/include)
+	set(CLIENT_LIB_SRCS
+			${CLIENT_SRC_DIR}/handler/exception_handler.cc
+			${CLIENT_SRC_DIR}/handler/dynamic_images.cc
+			${CLIENT_SRC_DIR}/handler/minidump_generator.cc
+			${BREAKPAD_SRC_DIR}/common/mac/file_id.cc
+			${BREAKPAD_SRC_DIR}/common/mac/macho_id.cc
+			${BREAKPAD_SRC_DIR}/common/mac/macho_utilities.cc
+			${BREAKPAD_SRC_DIR}/common/mac/macho_walker.cc
+			${BREAKPAD_SRC_DIR}/common/mac/string_utilities.cc
+			${BREAKPAD_SRC_DIR}/common/string_conversion.cc
+			${BREAKPAD_SRC_DIR}/common/convert_UTF.c
+			${BREAKPAD_SRC_DIR}/client/minidump_file_writer.cc
+	)
+	add_library(breakpad ${CLIENT_LIB_SRCS})
+	target_link_libraries(breakpad crypto)
 elseif(UNIX)
 	set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/linux)
 	include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/linux/include)
