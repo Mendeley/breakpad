@@ -28,6 +28,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 extern "C" { // needed to compile on Leopard
+  #include <assert.h>
   #include <mach-o/nlist.h>
   #include <stdlib.h>
   #include <stdio.h>
