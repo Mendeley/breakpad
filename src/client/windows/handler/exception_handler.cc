@@ -116,6 +116,7 @@ void ExceptionHandler::Initialize(const wstring& dump_path,
   assertion_ = NULL;
   handler_return_value_ = false;
   handle_debug_exceptions_ = false;
+  terminate_on_unhandled_exception_ = false;
 
   // Attempt to use out-of-process if user has specified pipe name.
   if (pipe_name != NULL) {
@@ -437,6 +438,13 @@ LONG ExceptionHandler::HandleException(EXCEPTION_POINTERS* exinfo) {
   // application to be restarted.
   if (success) {
     action = EXCEPTION_EXECUTE_HANDLER;
+	// under Windows XP, returning EXCEPTION_EXECUTE_HANDLER results
+	// in ExitProcess() being called, which notifies loaded DLLs via DllMain()
+	// this can in turn cause crashes or hangs.  To prevent a hang, we
+	// terminate the process here
+	if (current_handler->terminate_on_unhandled_exception_) {
+      TerminateProcess(GetCurrentProcess(),1);
+	}
   } else {
     // There was an exception, it was a breakpoint or something else ignored
     // above, or it was passed to the handler, which decided not to handle it.

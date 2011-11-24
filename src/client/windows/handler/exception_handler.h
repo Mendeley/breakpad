@@ -202,6 +202,10 @@ class ExceptionHandler {
     handle_debug_exceptions_ = handle_debug_exceptions;
   }
 
+  void set_terminate_on_unhandled_exception(bool terminate) {
+    terminate_on_unhandled_exception_ = terminate;
+  }
+
   // Returns whether out-of-process dump generation is used or not.
   bool IsOutOfProcess() const { return crash_generation_client_.get() != NULL; }
 
@@ -381,6 +385,11 @@ class ExceptionHandler {
   // EXCEPTION_SINGLE_STEP exceptions.  Leave this false (the default)
   // to not interfere with debuggers.
   bool handle_debug_exceptions_;
+
+  // If true, ExceptionHandler will call TerminateProcess() if an
+  // exception is handled, instead of letting the default exception
+  // handler deal with the exception
+  bool terminate_on_unhandled_exception_;
 
   // A stack of ExceptionHandler objects that have installed unhandled
   // exception filters.  This vector is used by HandleException to determine
