@@ -19,6 +19,7 @@ elseif(APPLE)
 	set(CLIENT_LIB_SRCS
 			${CLIENT_SRC_DIR}/handler/exception_handler.cc
 			${CLIENT_SRC_DIR}/handler/dynamic_images.cc
+			${CLIENT_SRC_DIR}/handler/breakpad_nlist_64.cc
 			${CLIENT_SRC_DIR}/handler/minidump_generator.cc
 			${BREAKPAD_SRC_DIR}/common/mac/file_id.cc
 			${BREAKPAD_SRC_DIR}/common/mac/macho_id.cc

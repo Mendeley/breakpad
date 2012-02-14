@@ -65,16 +65,8 @@ int MachoWalker::ValidateCPUType(int cpu_type) {
   // fails, use the base type for the executable.
   if (cpu_type == 0) {
     const NXArchInfo *arch = NXGetLocalArchInfo();
-    if (arch)
-      cpu_type = arch->cputype;
-    else
-#if __ppc__
-      cpu_type = CPU_TYPE_POWERPC;
-#elif __i386__
-    cpu_type = CPU_TYPE_X86;
-#else
-#error Unknown architecture -- are you on a PDP-11?
-#endif
+	assert(arch);
+    cpu_type = arch->cputype;
   }
 
   return cpu_type;
