@@ -1,4 +1,4 @@
-// Copyright 2006 Google Inc. All Rights Reserved.
+// Copyright (c) 2010 Google Inc. All Rights Reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -30,10 +30,13 @@
 // information from the debug info.
 
 #include <assert.h>
+#include <limits.h>
+#include <stdio.h>
 
 #include <map>
 #include <queue>
 #include <vector>
+#include <memory>
 
 #include "common/dwarf/functioninfo.h"
 
@@ -42,27 +45,8 @@
 
 namespace dwarf2reader {
 
-// Given an offset value, its form, and the base offset of the
-// compilation unit containing this value, return an absolute offset
-// within the .debug_info section.
-uint64 GetAbsoluteOffset(uint64 offset,
-                         enum DwarfForm form,
-                         uint64 compilation_unit_base) {
-  switch (form) {
-    case DW_FORM_ref1:
-    case DW_FORM_ref2:
-    case DW_FORM_ref4:
-    case DW_FORM_ref8:
-    case DW_FORM_ref_udata:
-      return offset + compilation_unit_base;
-    case DW_FORM_ref_addr:
-    default:
-      return offset;
-  }
-}
-
-CULineInfoHandler::CULineInfoHandler(vector<SourceFileInfo>* files,
-                                     vector<string>* dirs,
+CULineInfoHandler::CULineInfoHandler(std::vector<SourceFileInfo>* files,
+                                     std::vector<std::string>* dirs,
                                      LineMap* linemap):linemap_(linemap),
                                                        files_(files),
                                                        dirs_(dirs) {
@@ -77,13 +61,13 @@ CULineInfoHandler::CULineInfoHandler(vector<SourceFileInfo>* files,
   files->push_back(s);
 }
 
-void CULineInfoHandler::DefineDir(const string& name, uint32 dir_num) {
+void CULineInfoHandler::DefineDir(const std::string& name, uint32 dir_num) {
   // These should never come out of order, actually
   assert(dir_num == dirs_->size());
   dirs_->push_back(name);
 }
 
-void CULineInfoHandler::DefineFile(const string& name,
+void CULineInfoHandler::DefineFile(const std::string& name,
                                    int32 file_num, uint32 dir_num,
                                    uint64 mod_time, uint64 length) {
   assert(dir_num >= 0);
@@ -91,7 +75,7 @@ void CULineInfoHandler::DefineFile(const string& name,
 
   // These should never come out of order, actually.
   if (file_num == (int32)files_->size() || file_num == -1) {
-    string dir = dirs_->at(dir_num);
+    std::string dir = dirs_->at(dir_num);
 
     SourceFileInfo s;
     s.lowpc = ULLONG_MAX;
@@ -108,11 +92,13 @@ void CULineInfoHandler::DefineFile(const string& name,
   }
 }
 
-void CULineInfoHandler::AddLine(uint64 address, uint32 file_num,
+void CULineInfoHandler::AddLine(uint64 address, uint64 length, uint32 file_num,
                                 uint32 line_num, uint32 column_num) {
   if (file_num < files_->size()) {
-    linemap_->insert(make_pair(address, make_pair(files_->at(file_num).name.c_str(),
-                                                  line_num)));
+    linemap_->insert(
+        std::make_pair(address,
+                       std::make_pair(files_->at(file_num).name.c_str(),
+                                      line_num)));
 
     if(address < files_->at(file_num).lowpc) {
       files_->at(file_num).lowpc = address;
@@ -146,7 +132,8 @@ bool CUFunctionInfoHandler::StartDIE(uint64 offset, enum DwarfTag tag,
       current_function_info_->name = "";
       current_function_info_->line = 0;
       current_function_info_->file = "";
-      offset_to_funcinfo_->insert(make_pair(offset, current_function_info_));
+      offset_to_funcinfo_->insert(std::make_pair(offset,
+                                                 current_function_info_));
     };
       // FALLTHROUGH
     case DW_TAG_compile_unit:
@@ -162,7 +149,7 @@ bool CUFunctionInfoHandler::StartDIE(uint64 offset, enum DwarfTag tag,
 void CUFunctionInfoHandler::ProcessAttributeString(uint64 offset,
                                                    enum DwarfAttribute attr,
                                                    enum DwarfForm form,
-                                                   const string &data) {
+                                                   const std::string &data) {
   if (current_function_info_) {
     if (attr == DW_AT_name)
       current_function_info_->name = data;
@@ -180,9 +167,9 @@ void CUFunctionInfoHandler::ProcessAttributeUnsigned(uint64 offset,
     assert(iter != sections_.end());
 
     // this should be a scoped_ptr but we dont' use boost :-(
-    auto_ptr<LineInfo> lireader(new LineInfo(iter->second.first + data,
-                                               iter->second.second  - data,
-                                               reader_, linehandler_));
+    std::auto_ptr<LineInfo> lireader(new LineInfo(iter->second.first + data,
+                                                  iter->second.second  - data,
+                                                  reader_, linehandler_));
     lireader->Start();
   } else if (current_function_info_) {
     switch (attr) {
@@ -198,6 +185,18 @@ void CUFunctionInfoHandler::ProcessAttributeUnsigned(uint64 offset,
       case DW_AT_decl_file:
         current_function_info_->file = files_->at(data).name;
         break;
+      default:
+        break;
+    }
+  }
+}
+
+void CUFunctionInfoHandler::ProcessAttributeReference(uint64 offset,
+                                                      enum DwarfAttribute attr,
+                                                      enum DwarfForm form,
+                                                      uint64 data) {
+  if (current_function_info_) {
+    switch (attr) {
       case DW_AT_specification: {
         // Some functions have a "specification" attribute
         // which means they were defined elsewhere. The name
@@ -205,14 +204,13 @@ void CUFunctionInfoHandler::ProcessAttributeUnsigned(uint64 offset,
         // the specification DIE. Here we'll assume that
         // any DIE referenced in this manner will already have
         // been seen, but that's not really required by the spec.
-        uint64 abs_offset = GetAbsoluteOffset(data, form, current_compilation_unit_offset_);
-        FunctionMap::iterator iter = offset_to_funcinfo_->find(abs_offset);
+        FunctionMap::iterator iter = offset_to_funcinfo_->find(data);
         if (iter != offset_to_funcinfo_->end()) {
           current_function_info_->name = iter->second->name;
           current_function_info_->mangled_name = iter->second->mangled_name;
         } else {
           // If you hit this, this code probably needs to be rewritten.
-          fprintf(stderr, "Error: DW_AT_specification was seen before the referenced DIE! (Looking for DIE at offset %08llx, in DIE at offset %08llx)\n", abs_offset, offset);
+          fprintf(stderr, "Error: DW_AT_specification was seen before the referenced DIE! (Looking for DIE at offset %08llx, in DIE at offset %08llx)\n", data, offset);
         }
         break;
       }
@@ -224,8 +222,8 @@ void CUFunctionInfoHandler::ProcessAttributeUnsigned(uint64 offset,
 
 void CUFunctionInfoHandler::EndDIE(uint64 offset) {
   if (current_function_info_ && current_function_info_->lowpc)
-    address_to_funcinfo_->insert(make_pair(current_function_info_->lowpc,
-                                           current_function_info_));
+    address_to_funcinfo_->insert(std::make_pair(current_function_info_->lowpc,
+                                                current_function_info_));
 }
 
 }  // namespace dwarf2reader

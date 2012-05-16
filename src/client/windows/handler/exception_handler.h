@@ -88,9 +88,9 @@ class ExceptionHandler {
   // if any.
   //
   // If a FilterCallback returns true, Breakpad will continue processing,
-  // attempting to write a minidump.  If a FilterCallback returns false, Breakpad
-  // will immediately report the exception as unhandled without writing a
-  // minidump, allowing another handler the opportunity to handle it.
+  // attempting to write a minidump.  If a FilterCallback returns false,
+  // Breakpad will immediately report the exception as unhandled without
+  // writing a minidump, allowing another handler the opportunity to handle it.
   typedef bool (*FilterCallback)(void* context, EXCEPTION_POINTERS* exinfo,
                                  MDRawAssertionInfo* assertion);
 
@@ -177,6 +177,9 @@ class ExceptionHandler {
     UpdateNextID();  // Necessary to put dump_path_ in next_minidump_path_.
   }
 
+  // Requests that a previously reported crash be uploaded.
+  bool RequestUpload(DWORD crash_id);
+
   // Writes a minidump immediately.  This can be used to capture the
   // execution state independently of a crash.  Returns true on success.
   bool WriteMinidump();
@@ -200,10 +203,6 @@ class ExceptionHandler {
   bool get_handle_debug_exceptions() const { return handle_debug_exceptions_; }
   void set_handle_debug_exceptions(bool handle_debug_exceptions) {
     handle_debug_exceptions_ = handle_debug_exceptions;
-  }
-
-  void set_terminate_on_unhandled_exception(bool terminate) {
-    terminate_on_unhandled_exception_ = terminate;
   }
 
   // Returns whether out-of-process dump generation is used or not.
@@ -280,6 +279,13 @@ class ExceptionHandler {
   bool WriteMinidumpWithException(DWORD requesting_thread_id,
                                   EXCEPTION_POINTERS* exinfo,
                                   MDRawAssertionInfo* assertion);
+
+  // This function is used as a callback when calling MinidumpWriteDump,
+  // in order to add additional memory regions to the dump.
+  static BOOL CALLBACK MinidumpWriteDumpCallback(
+      PVOID context,
+      const PMINIDUMP_CALLBACK_INPUT callback_input,
+      PMINIDUMP_CALLBACK_OUTPUT callback_output);
 
   // Generates a new ID and stores it in next_minidump_id_, and stores the
   // path of the next minidump to be written in next_minidump_path_.
@@ -385,11 +391,6 @@ class ExceptionHandler {
   // EXCEPTION_SINGLE_STEP exceptions.  Leave this false (the default)
   // to not interfere with debuggers.
   bool handle_debug_exceptions_;
-
-  // If true, ExceptionHandler will call TerminateProcess() if an
-  // exception is handled, instead of letting the default exception
-  // handler deal with the exception
-  bool terminate_on_unhandled_exception_;
 
   // A stack of ExceptionHandler objects that have installed unhandled
   // exception filters.  This vector is used by HandleException to determine

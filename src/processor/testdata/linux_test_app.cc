@@ -39,13 +39,14 @@
 // generate an executable with STABS symbols (needs -m32), or -gdwarf-2 for one
 // with DWARF symbols (32- or 64-bit)
 
+#include <stdio.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <cstdio>
+
 #include <string>
 
-#include "common/linux/linux_syscall_support.h"
 #include "client/linux/handler/exception_handler.h"
+#include "third_party/lss/linux_syscall_support.h"
 
 namespace {
 

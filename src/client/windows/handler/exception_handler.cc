@@ -29,6 +29,7 @@
 
 #include <ObjBase.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 
@@ -42,6 +43,13 @@ namespace google_breakpad {
 
 static const int kWaitForHandlerThreadMs = 60000;
 static const int kExceptionHandlerThreadInitialStackSize = 64 * 1024;
+
+// This is passed as the context to the MinidumpWriteDump callback.
+typedef struct {
+  ULONG64 memory_base;
+  ULONG memory_size;
+  bool finished;
+} MinidumpCallbackContext;
 
 vector<ExceptionHandler*>* ExceptionHandler::handler_stack_ = NULL;
 LONG ExceptionHandler::handler_stack_index_ = 0;
@@ -116,7 +124,6 @@ void ExceptionHandler::Initialize(const wstring& dump_path,
   assertion_ = NULL;
   handler_return_value_ = false;
   handle_debug_exceptions_ = false;
-  terminate_on_unhandled_exception_ = false;
 
   // Attempt to use out-of-process if user has specified pipe name.
   if (pipe_name != NULL) {
@@ -305,6 +312,10 @@ ExceptionHandler::~ExceptionHandler() {
   }
 }
 
+bool ExceptionHandler::RequestUpload(DWORD crash_id) {
+  return crash_generation_client_->RequestUpload(crash_id);
+}
+
 // static
 DWORD ExceptionHandler::ExceptionHandlerThreadMain(void* lpParameter) {
   ExceptionHandler* self = reinterpret_cast<ExceptionHandler *>(lpParameter);
@@ -346,7 +357,7 @@ class AutoExceptionHandler {
   AutoExceptionHandler() {
     // Increment handler_stack_index_ so that if another Breakpad handler is
     // registered using this same HandleException function, and it needs to be
-    // called while this handler is running (either becaause this handler
+    // called while this handler is running (either because this handler
     // declines to handle the exception, or an exception occurs during
     // handling), HandleException will find the appropriate ExceptionHandler
     // object in handler_stack_ to deliver the exception to.
@@ -364,7 +375,6 @@ class AutoExceptionHandler {
     handler_ = ExceptionHandler::handler_stack_->at(
         ExceptionHandler::handler_stack_->size() -
         ++ExceptionHandler::handler_stack_index_);
-    LeaveCriticalSection(&ExceptionHandler::handler_stack_critical_section_);
 
     // In case another exception occurs while this handler is doing its thing,
     // it should be delivered to the previous filter.
@@ -383,7 +393,6 @@ class AutoExceptionHandler {
 #endif  // _MSC_VER >= 1400
     _set_purecall_handler(ExceptionHandler::HandlePureVirtualCall);
 
-    EnterCriticalSection(&ExceptionHandler::handler_stack_critical_section_);
     --ExceptionHandler::handler_stack_index_;
     LeaveCriticalSection(&ExceptionHandler::handler_stack_critical_section_);
   }
@@ -438,13 +447,6 @@ LONG ExceptionHandler::HandleException(EXCEPTION_POINTERS* exinfo) {
   // application to be restarted.
   if (success) {
     action = EXCEPTION_EXECUTE_HANDLER;
-	// under Windows XP, returning EXCEPTION_EXECUTE_HANDLER results
-	// in ExitProcess() being called, which notifies loaded DLLs via DllMain()
-	// this can in turn cause crashes or hangs.  To prevent a hang, we
-	// terminate the process here
-	if (current_handler->terminate_on_unhandled_exception_) {
-      TerminateProcess(GetCurrentProcess(),1);
-	}
   } else {
     // There was an exception, it was a breakpoint or something else ignored
     // above, or it was passed to the handler, which decided not to handle it.
@@ -490,16 +492,39 @@ void ExceptionHandler::HandleInvalidParameter(const wchar_t* expression,
   assertion.line = line;
   assertion.type = MD_ASSERTION_INFO_TYPE_INVALID_PARAMETER;
 
+  // Make up an exception record for the current thread and CPU context
+  // to make it possible for the crash processor to classify these
+  // as do regular crashes, and to make it humane for developers to
+  // analyze them.
+  EXCEPTION_RECORD exception_record = {};
+  CONTEXT exception_context = {};
+  EXCEPTION_POINTERS exception_ptrs = { &exception_record, &exception_context };
+
+  ::RtlCaptureContext(&exception_context);
+
+  exception_record.ExceptionCode = STATUS_INVALID_PARAMETER;
+
+  // We store pointers to the the expression and function strings,
+  // and the line as exception parameters to make them easy to
+  // access by the developer on the far side.
+  exception_record.NumberParameters = 3;
+  exception_record.ExceptionInformation[0] =
+      reinterpret_cast<ULONG_PTR>(&assertion.expression);
+  exception_record.ExceptionInformation[1] =
+      reinterpret_cast<ULONG_PTR>(&assertion.file);
+  exception_record.ExceptionInformation[2] = assertion.line;
+
   bool success = false;
   // In case of out-of-process dump generation, directly call
   // WriteMinidumpWithException since there is no separate thread running.
   if (current_handler->IsOutOfProcess()) {
     success = current_handler->WriteMinidumpWithException(
         GetCurrentThreadId(),
-        NULL,
+        &exception_ptrs,
         &assertion);
   } else {
-    success = current_handler->WriteMinidumpOnHandlerThread(NULL, &assertion);
+    success = current_handler->WriteMinidumpOnHandlerThread(&exception_ptrs,
+                                                            &assertion);
   }
 
   if (!success) {
@@ -538,12 +563,36 @@ void ExceptionHandler::HandleInvalidParameter(const wchar_t* expression,
 
 // static
 void ExceptionHandler::HandlePureVirtualCall() {
+  // This is an pure virtual function call, not an exception.  It's safe to
+  // play with sprintf here.
   AutoExceptionHandler auto_exception_handler;
   ExceptionHandler* current_handler = auto_exception_handler.get_handler();
 
   MDRawAssertionInfo assertion;
   memset(&assertion, 0, sizeof(assertion));
   assertion.type = MD_ASSERTION_INFO_TYPE_PURE_VIRTUAL_CALL;
+
+  // Make up an exception record for the current thread and CPU context
+  // to make it possible for the crash processor to classify these
+  // as do regular crashes, and to make it humane for developers to
+  // analyze them.
+  EXCEPTION_RECORD exception_record = {};
+  CONTEXT exception_context = {};
+  EXCEPTION_POINTERS exception_ptrs = { &exception_record, &exception_context };
+
+  ::RtlCaptureContext(&exception_context);
+
+  exception_record.ExceptionCode = STATUS_NONCONTINUABLE_EXCEPTION;
+
+  // We store pointers to the the expression and function strings,
+  // and the line as exception parameters to make them easy to
+  // access by the developer on the far side.
+  exception_record.NumberParameters = 3;
+  exception_record.ExceptionInformation[0] =
+      reinterpret_cast<ULONG_PTR>(&assertion.expression);
+  exception_record.ExceptionInformation[1] =
+      reinterpret_cast<ULONG_PTR>(&assertion.file);
+  exception_record.ExceptionInformation[2] = assertion.line;
 
   bool success = false;
   // In case of out-of-process dump generation, directly call
@@ -552,10 +601,11 @@ void ExceptionHandler::HandlePureVirtualCall() {
   if (current_handler->IsOutOfProcess()) {
     success = current_handler->WriteMinidumpWithException(
         GetCurrentThreadId(),
-        NULL,
+        &exception_ptrs,
         &assertion);
   } else {
-    success = current_handler->WriteMinidumpOnHandlerThread(NULL, &assertion);
+    success = current_handler->WriteMinidumpOnHandlerThread(&exception_ptrs,
+                                                            &assertion);
   }
 
   if (!success) {
@@ -614,7 +664,18 @@ bool ExceptionHandler::WriteMinidumpOnHandlerThread(
 }
 
 bool ExceptionHandler::WriteMinidump() {
-  return WriteMinidumpForException(NULL);
+  // Make up an exception record for the current thread and CPU context
+  // to make it possible for the crash processor to classify these
+  // as do regular crashes, and to make it humane for developers to
+  // analyze them.
+  EXCEPTION_RECORD exception_record = {};
+  CONTEXT exception_context = {};
+  EXCEPTION_POINTERS exception_ptrs = { &exception_record, &exception_context };
+
+  ::RtlCaptureContext(&exception_context);
+  exception_record.ExceptionCode = STATUS_NONCONTINUABLE_EXCEPTION;
+
+  return WriteMinidumpForException(&exception_ptrs);
 }
 
 bool ExceptionHandler::WriteMinidumpForException(EXCEPTION_POINTERS* exinfo) {
@@ -656,13 +717,7 @@ bool ExceptionHandler::WriteMinidumpWithException(
 
   bool success = false;
   if (IsOutOfProcess()) {
-    // Use the EXCEPTION_POINTERS overload for RequestDump if
-    // both exinfo and assertion are NULL.
-    if (!assertion) {
-      success = crash_generation_client_->RequestDump(exinfo);
-    } else {
-      success = crash_generation_client_->RequestDump(assertion);
-    }
+    success = crash_generation_client_->RequestDump(exinfo, assertion);
   } else {
     if (minidump_write_dump_) {
       HANDLE dump_file = CreateFile(next_minidump_path_c_,
@@ -678,12 +733,13 @@ bool ExceptionHandler::WriteMinidumpWithException(
         except_info.ExceptionPointers = exinfo;
         except_info.ClientPointers = FALSE;
 
-        // Add an MDRawBreakpadInfo stream to the minidump, to provide additional
-        // information about the exception handler to the Breakpad processor.  The
-        // information will help the processor determine which threads are
-        // relevant.  The Breakpad processor does not require this information but
-        // can function better with Breakpad-generated dumps when it is present.
-        // The native debugger is not harmed by the presence of this information.
+        // Add an MDRawBreakpadInfo stream to the minidump, to provide
+        // additional information about the exception handler to the Breakpad
+        // processor. The information will help the processor determine which
+        // threads are relevant.  The Breakpad processor does not require this
+        // information but can function better with Breakpad-generated dumps
+        // when it is present. The native debugger is not harmed by the
+        // presence of this information.
         MDRawBreakpadInfo breakpad_info;
         breakpad_info.validity = MD_BREAKPAD_INFO_VALID_DUMP_THREAD_ID |
                                MD_BREAKPAD_INFO_VALID_REQUESTING_THREAD_ID;
@@ -707,6 +763,50 @@ bool ExceptionHandler::WriteMinidumpWithException(
           ++user_streams.UserStreamCount;
         }
 
+        MINIDUMP_CALLBACK_INFORMATION callback;
+        MinidumpCallbackContext context;
+        MINIDUMP_CALLBACK_INFORMATION* callback_pointer = NULL;
+        // Older versions of DbgHelp.dll don't correctly put the memory around
+        // the faulting instruction pointer into the minidump. This
+        // callback will ensure that it gets included.
+        if (exinfo) {
+          // Find a memory region of 256 bytes centered on the
+          // faulting instruction pointer.
+          const ULONG64 instruction_pointer = 
+#if defined(_M_IX86)
+            exinfo->ContextRecord->Eip;
+#elif defined(_M_AMD64)
+            exinfo->ContextRecord->Rip;
+#else
+#error Unsupported platform
+#endif
+
+          MEMORY_BASIC_INFORMATION info;
+          if (VirtualQuery(reinterpret_cast<LPCVOID>(instruction_pointer),
+                           &info,
+                           sizeof(MEMORY_BASIC_INFORMATION)) != 0 &&
+              info.State == MEM_COMMIT) {
+            // Attempt to get 128 bytes before and after the instruction
+            // pointer, but settle for whatever's available up to the
+            // boundaries of the memory region.
+            const ULONG64 kIPMemorySize = 256;
+            context.memory_base =
+              (std::max)(reinterpret_cast<ULONG64>(info.BaseAddress),
+                       instruction_pointer - (kIPMemorySize / 2));
+            ULONG64 end_of_range =
+              (std::min)(instruction_pointer + (kIPMemorySize / 2),
+                       reinterpret_cast<ULONG64>(info.BaseAddress)
+                       + info.RegionSize);
+            context.memory_size =
+                static_cast<ULONG>(end_of_range - context.memory_base);
+
+            context.finished = false;
+            callback.CallbackRoutine = MinidumpWriteDumpCallback;
+            callback.CallbackParam = reinterpret_cast<void*>(&context);
+            callback_pointer = &callback;
+          }
+        }
+
         // The explicit comparison to TRUE avoids a warning (C4800).
         success = (minidump_write_dump_(GetCurrentProcess(),
                                         GetCurrentProcessId(),
@@ -714,7 +814,7 @@ bool ExceptionHandler::WriteMinidumpWithException(
                                         dump_type_,
                                         exinfo ? &except_info : NULL,
                                         &user_streams,
-                                        NULL) == TRUE);
+                                        callback_pointer) == TRUE);
 
         CloseHandle(dump_file);
       }
@@ -731,6 +831,45 @@ bool ExceptionHandler::WriteMinidumpWithException(
   }
 
   return success;
+}
+
+// static
+BOOL CALLBACK ExceptionHandler::MinidumpWriteDumpCallback(
+    PVOID context,
+    const PMINIDUMP_CALLBACK_INPUT callback_input,
+    PMINIDUMP_CALLBACK_OUTPUT callback_output) {
+  switch (callback_input->CallbackType) {
+  case MemoryCallback: {
+    MinidumpCallbackContext* callback_context =
+        reinterpret_cast<MinidumpCallbackContext*>(context);
+    if (callback_context->finished)
+      return FALSE;
+
+    // Include the specified memory region.
+    callback_output->MemoryBase = callback_context->memory_base;
+    callback_output->MemorySize = callback_context->memory_size;
+    callback_context->finished = true;
+    return TRUE;
+  }
+    
+    // Include all modules.
+  case IncludeModuleCallback:
+  case ModuleCallback:
+    return TRUE;
+
+    // Include all threads.
+  case IncludeThreadCallback:
+  case ThreadCallback:
+    return TRUE;
+
+    // Stop receiving cancel callbacks.
+  case CancelCallback:
+    callback_output->CheckCancel = FALSE;
+    callback_output->Cancel = FALSE;
+    return TRUE;
+  }
+  // Ignore other callback types.
+  return FALSE;
 }
 
 void ExceptionHandler::UpdateNextID() {

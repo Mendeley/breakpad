@@ -30,10 +30,14 @@
 // Unit test for MinidumpProcessor.  Uses a pre-generated minidump and
 // corresponding symbol file, and checks the stack frames for correctness.
 
-#include <cstdlib>
+#include <stdlib.h>
+
 #include <string>
 #include <iostream>
 #include <fstream>
+#include <map>
+#include <utility>
+
 #include "breakpad_googletest_includes.h"
 #include "google_breakpad/processor/basic_source_line_resolver.h"
 #include "google_breakpad/processor/call_stack.h"
@@ -47,16 +51,18 @@
 #include "processor/logging.h"
 #include "processor/scoped_ptr.h"
 
+using std::map;
+
 namespace google_breakpad {
 class MockMinidump : public Minidump {
  public:
   MockMinidump() : Minidump("") {
   }
 
-  MOCK_METHOD0(Read,bool());
+  MOCK_METHOD0(Read, bool());
   MOCK_CONST_METHOD0(path, string());
-  MOCK_CONST_METHOD0(header,const MDRawHeader*());
-  MOCK_METHOD0(GetThreadList,MinidumpThreadList*());
+  MOCK_CONST_METHOD0(header, const MDRawHeader*());
+  MOCK_METHOD0(GetThreadList, MinidumpThreadList*());
 };
 }
 
@@ -74,6 +80,10 @@ using google_breakpad::scoped_ptr;
 using google_breakpad::SymbolSupplier;
 using google_breakpad::SystemInfo;
 using std::string;
+using ::testing::_;
+using ::testing::Mock;
+using ::testing::Ne;
+using ::testing::Property;
 using ::testing::Return;
 
 static const char *kSystemInfoOS = "Windows NT";
@@ -104,11 +114,19 @@ class TestSymbolSupplier : public SymbolSupplier {
                                      string *symbol_file,
                                      string *symbol_data);
 
+  virtual SymbolResult GetCStringSymbolData(const CodeModule *module,
+                                            const SystemInfo *system_info,
+                                            string *symbol_file,
+                                            char **symbol_data);
+
+  virtual void FreeSymbolData(const CodeModule *module);
+
   // When set to true, causes the SymbolSupplier to return INTERRUPT
   void set_interrupt(bool interrupt) { interrupt_ = interrupt; }
 
  private:
   bool interrupt_;
+  map<string, char *> memory_buffers_;
 };
 
 SymbolSupplier::SymbolResult TestSymbolSupplier::GetSymbolFile(
@@ -155,9 +173,59 @@ SymbolSupplier::SymbolResult TestSymbolSupplier::GetSymbolFile(
   return s;
 }
 
+SymbolSupplier::SymbolResult TestSymbolSupplier::GetCStringSymbolData(
+    const CodeModule *module,
+    const SystemInfo *system_info,
+    string *symbol_file,
+    char **symbol_data) {
+  string symbol_data_string;
+  SymbolSupplier::SymbolResult s = GetSymbolFile(module,
+                                                 system_info,
+                                                 symbol_file,
+                                                 &symbol_data_string);
+  if (s == FOUND) {
+    unsigned int size = symbol_data_string.size() + 1;
+    *symbol_data = new char[size];
+    if (*symbol_data == NULL) {
+      BPLOG(ERROR) << "Memory allocation failed for module: "
+                   << module->code_file() << " size: " << size;
+      return INTERRUPT;
+    }
+    strcpy(*symbol_data, symbol_data_string.c_str());
+    memory_buffers_.insert(make_pair(module->code_file(), *symbol_data));
+  }
+
+  return s;
+}
+
+void TestSymbolSupplier::FreeSymbolData(const CodeModule *module) {
+  map<string, char *>::iterator it = memory_buffers_.find(module->code_file());
+  if (it != memory_buffers_.end()) {
+    delete [] it->second;
+    memory_buffers_.erase(it);
+  }
+}
+
+// A mock symbol supplier that always returns NOT_FOUND; one current
+// use for testing the processor's caching of symbol lookups.
+class MockSymbolSupplier : public SymbolSupplier {
+ public:
+  MockSymbolSupplier() { }
+  MOCK_METHOD3(GetSymbolFile, SymbolResult(const CodeModule*,
+                                           const SystemInfo*,
+                                           string*));
+  MOCK_METHOD4(GetSymbolFile, SymbolResult(const CodeModule*,
+                                           const SystemInfo*,
+                                           string*,
+                                           string*));
+  MOCK_METHOD4(GetCStringSymbolData, SymbolResult(const CodeModule*,
+                                                  const SystemInfo*,
+                                                  string*,
+                                                  char**));
+  MOCK_METHOD1(FreeSymbolData, void(const CodeModule*));
+};
 
 class MinidumpProcessorTest : public ::testing::Test {
-
 };
 
 TEST_F(MinidumpProcessorTest, TestCorruptMinidumps) {
@@ -167,7 +235,7 @@ TEST_F(MinidumpProcessorTest, TestCorruptMinidumps) {
   MinidumpProcessor processor(&supplier, &resolver);
   ProcessState state;
 
-  EXPECT_EQ(processor.Process("nonexistant minidump", &state),
+  EXPECT_EQ(processor.Process("nonexistent minidump", &state),
             google_breakpad::PROCESS_ERROR_MINIDUMP_NOT_FOUND);
 
   EXPECT_CALL(dump, path()).WillRepeatedly(Return("mock minidump"));
@@ -184,6 +252,43 @@ TEST_F(MinidumpProcessorTest, TestCorruptMinidumps) {
       WillOnce(Return((MinidumpThreadList*)NULL));
   EXPECT_EQ(processor.Process(&dump, &state),
             google_breakpad::PROCESS_ERROR_NO_THREAD_LIST);
+}
+
+// This test case verifies that the symbol supplier is only consulted
+// once per minidump per module.
+TEST_F(MinidumpProcessorTest, TestSymbolSupplierLookupCounts) {
+  MockSymbolSupplier supplier;
+  BasicSourceLineResolver resolver;
+  MinidumpProcessor processor(&supplier, &resolver);
+
+  string minidump_file = string(getenv("srcdir") ? getenv("srcdir") : ".") +
+                         "/src/processor/testdata/minidump2.dmp";
+  ProcessState state;
+  EXPECT_CALL(supplier, GetCStringSymbolData(
+      Property(&google_breakpad::CodeModule::code_file,
+               "c:\\test_app.exe"),
+      _, _, _)).WillOnce(Return(SymbolSupplier::NOT_FOUND));
+  EXPECT_CALL(supplier, GetCStringSymbolData(
+      Property(&google_breakpad::CodeModule::code_file,
+               Ne("c:\\test_app.exe")),
+      _, _, _)).WillRepeatedly(Return(SymbolSupplier::NOT_FOUND));
+  ASSERT_EQ(processor.Process(minidump_file, &state),
+            google_breakpad::PROCESS_OK);
+
+  ASSERT_TRUE(Mock::VerifyAndClearExpectations(&supplier));
+
+  // We need to verify that across minidumps, the processor will refetch
+  // symbol files, even with the same symbol supplier.
+  EXPECT_CALL(supplier, GetCStringSymbolData(
+      Property(&google_breakpad::CodeModule::code_file,
+               "c:\\test_app.exe"),
+      _, _, _)).WillOnce(Return(SymbolSupplier::NOT_FOUND));
+  EXPECT_CALL(supplier, GetCStringSymbolData(
+      Property(&google_breakpad::CodeModule::code_file,
+               Ne("c:\\test_app.exe")),
+      _, _, _)).WillRepeatedly(Return(SymbolSupplier::NOT_FOUND));
+  ASSERT_EQ(processor.Process(minidump_file, &state),
+            google_breakpad::PROCESS_OK);
 }
 
 TEST_F(MinidumpProcessorTest, TestBasicProcessing) {
@@ -203,7 +308,7 @@ TEST_F(MinidumpProcessorTest, TestBasicProcessing) {
   ASSERT_EQ(state.system_info()->cpu, kSystemInfoCPU);
   ASSERT_EQ(state.system_info()->cpu_info, kSystemInfoCPUInfo);
   ASSERT_TRUE(state.crashed());
-  ASSERT_EQ(state.crash_reason(), "EXCEPTION_ACCESS_VIOLATION");
+  ASSERT_EQ(state.crash_reason(), "EXCEPTION_ACCESS_VIOLATION_WRITE");
   ASSERT_EQ(state.crash_address(), 0x45U);
   ASSERT_EQ(state.threads()->size(), size_t(1));
   ASSERT_EQ(state.requesting_thread(), 0);
@@ -256,12 +361,16 @@ TEST_F(MinidumpProcessorTest, TestBasicProcessing) {
   ASSERT_EQ(state.modules()->GetModuleForAddress(0x77d43210)->version(),
             "5.1.2600.2622");
 
+  // Test that disabled exploitability engine defaults to
+  // EXPLOITABILITY_NOT_ANALYZED.
+  ASSERT_EQ(google_breakpad::EXPLOITABILITY_NOT_ANALYZED,
+            state.exploitability());
+
   // Test that the symbol supplier can interrupt processing
   state.Clear();
   supplier.set_interrupt(true);
   ASSERT_EQ(processor.Process(minidump_file, &state),
-            google_breakpad::PROCESS_SYMBOL_SUPPLIER_INTERRUPTED
-            );
+            google_breakpad::PROCESS_SYMBOL_SUPPLIER_INTERRUPTED);
 }
 }  // namespace
 

@@ -34,6 +34,8 @@
 #include "client/windows/common/auto_critical_section.h"
 #include "processor/scoped_ptr.h"
 
+#include "client/windows/crash_generation/client_info.h"
+
 namespace google_breakpad {
 
 // Output buffer size.
@@ -82,11 +84,12 @@ static const int kShutdownDelayMs = 10000;
 static const int kShutdownSleepIntervalMs = 5;
 
 static bool IsClientRequestValid(const ProtocolMessage& msg) {
-  return msg.tag == MESSAGE_TAG_REGISTRATION_REQUEST &&
-         msg.pid != 0 &&
-         msg.thread_id != NULL &&
-         msg.exception_pointers != NULL &&
-         msg.assert_info != NULL;
+  return msg.tag == MESSAGE_TAG_UPLOAD_REQUEST ||
+         (msg.tag == MESSAGE_TAG_REGISTRATION_REQUEST &&
+          msg.id != 0 &&
+          msg.thread_id != NULL &&
+          msg.exception_pointers != NULL &&
+          msg.assert_info != NULL);
 }
 
 CrashGenerationServer::CrashGenerationServer(
@@ -98,6 +101,8 @@ CrashGenerationServer::CrashGenerationServer(
     void* dump_context,
     OnClientExitedCallback exit_callback,
     void* exit_context,
+    OnClientUploadRequestCallback upload_request_callback,
+    void* upload_context,
     bool generate_dumps,
     const std::wstring* dump_path)
     : pipe_name_(pipe_name),
@@ -111,9 +116,11 @@ CrashGenerationServer::CrashGenerationServer(
       dump_context_(dump_context),
       exit_callback_(exit_callback),
       exit_context_(exit_context),
+      upload_request_callback_(upload_request_callback),
+      upload_context_(upload_context),
       generate_dumps_(generate_dumps),
       dump_generator_(NULL),
-      server_state_(IPC_SERVER_STATE_INITIAL),
+      server_state_(IPC_SERVER_STATE_UNINITIALIZED),
       shutting_down_(false),
       overlapped_(),
       client_info_(NULL),
@@ -197,10 +204,18 @@ CrashGenerationServer::~CrashGenerationServer() {
     CloseHandle(server_alive_handle_);
   }
 
+  if (overlapped_.hEvent) {
+    CloseHandle(overlapped_.hEvent);
+  }
+
   DeleteCriticalSection(&clients_sync_);
 }
 
 bool CrashGenerationServer::Start() {
+  if (server_state_ != IPC_SERVER_STATE_UNINITIALIZED) {
+    return false;
+  }
+
   server_state_ = IPC_SERVER_STATE_INITIAL;
 
   server_alive_handle_ = CreateMutex(NULL, TRUE, NULL);
@@ -239,9 +254,12 @@ bool CrashGenerationServer::Start() {
     return false;
   }
 
-  // Signal the event to start a separate thread to handle
-  // client connections.
-  return SetEvent(overlapped_.hEvent) != FALSE;
+  // Kick-start the state machine. This will initiate an asynchronous wait
+  // for client connections.
+  HandleInitialState();
+
+  // If we are in error state, it's because we failed to start listening.
+  return server_state_ != IPC_SERVER_STATE_ERROR;
 }
 
 // If the server thread serving clients ever gets into the
@@ -283,33 +301,29 @@ void CrashGenerationServer::HandleInitialState() {
   assert(server_state_ == IPC_SERVER_STATE_INITIAL);
 
   if (!ResetEvent(overlapped_.hEvent)) {
-    server_state_ = IPC_SERVER_STATE_ERROR;
+    EnterErrorState();
     return;
   }
 
   bool success = ConnectNamedPipe(pipe_, &overlapped_) != FALSE;
+  DWORD error_code = success ? ERROR_SUCCESS : GetLastError();
 
   // From MSDN, it is not clear that when ConnectNamedPipe is used
   // in an overlapped mode, will it ever return non-zero value, and
   // if so, in what cases.
   assert(!success);
 
-  DWORD error_code = GetLastError();
   switch (error_code) {
     case ERROR_IO_PENDING:
-      server_state_ = IPC_SERVER_STATE_CONNECTING;
+      EnterStateWhenSignaled(IPC_SERVER_STATE_CONNECTING);
       break;
 
     case ERROR_PIPE_CONNECTED:
-      if (SetEvent(overlapped_.hEvent)) {
-        server_state_ = IPC_SERVER_STATE_CONNECTED;
-      } else {
-        server_state_ = IPC_SERVER_STATE_ERROR;
-      }
+      EnterStateImmediately(IPC_SERVER_STATE_CONNECTED);
       break;
 
     default:
-      server_state_ = IPC_SERVER_STATE_ERROR;
+      EnterErrorState();
       break;
   }
 }
@@ -328,14 +342,14 @@ void CrashGenerationServer::HandleConnectingState() {
                                      &overlapped_,
                                      &bytes_count,
                                      FALSE) != FALSE;
+  DWORD error_code = success ? ERROR_SUCCESS : GetLastError();
 
   if (success) {
-    server_state_ = IPC_SERVER_STATE_CONNECTED;
-    return;
-  }
-
-  if (GetLastError() != ERROR_IO_INCOMPLETE) {
-    server_state_ = IPC_SERVER_STATE_DISCONNECTING;
+    EnterStateImmediately(IPC_SERVER_STATE_CONNECTED);
+  } else if (error_code != ERROR_IO_INCOMPLETE) {
+    EnterStateImmediately(IPC_SERVER_STATE_DISCONNECTING);
+  } else {
+    // remain in CONNECTING state
   }
 }
 
@@ -353,16 +367,17 @@ void CrashGenerationServer::HandleConnectedState() {
                           sizeof(msg_),
                           &bytes_count,
                           &overlapped_) != FALSE;
+  DWORD error_code = success ? ERROR_SUCCESS : GetLastError();
 
   // Note that the asynchronous read issued above can finish before the
   // code below executes. But, it is okay to change state after issuing
   // the asynchronous read. This is because even if the asynchronous read
   // is done, the callback for it would not be executed until the current
   // thread finishes its execution.
-  if (success || GetLastError() == ERROR_IO_PENDING) {
-    server_state_ = IPC_SERVER_STATE_READING;
+  if (success || error_code == ERROR_IO_PENDING) {
+    EnterStateWhenSignaled(IPC_SERVER_STATE_READING);
   } else {
-    server_state_ = IPC_SERVER_STATE_DISCONNECTING;
+    EnterStateImmediately(IPC_SERVER_STATE_DISCONNECTING);
   }
 }
 
@@ -378,21 +393,18 @@ void CrashGenerationServer::HandleReadingState() {
                                      &overlapped_,
                                      &bytes_count,
                                      FALSE) != FALSE;
+  DWORD error_code = success ? ERROR_SUCCESS : GetLastError();
 
   if (success && bytes_count == sizeof(ProtocolMessage)) {
-    server_state_ = IPC_SERVER_STATE_READ_DONE;
-    return;
+    EnterStateImmediately(IPC_SERVER_STATE_READ_DONE);
+  } else {
+    // We should never get an I/O incomplete since we should not execute this
+    // unless the Read has finished and the overlapped event is signaled. If
+    // we do get INCOMPLETE, we have a bug in our code.
+    assert(error_code != ERROR_IO_INCOMPLETE);
+
+    EnterStateImmediately(IPC_SERVER_STATE_DISCONNECTING);
   }
-
-  DWORD error_code;
-  error_code = GetLastError();
-
-  // We should never get an I/O incomplete since we should not execute this
-  // unless the Read has finished and the overlapped event is signaled. If
-  // we do get INCOMPLETE, we have a bug in our code.
-  assert(error_code != ERROR_IO_INCOMPLETE);
-
-  server_state_ = IPC_SERVER_STATE_DISCONNECTING;
 }
 
 // When the server thread serving the client is in the READ_DONE state,
@@ -405,13 +417,20 @@ void CrashGenerationServer::HandleReadDoneState() {
   assert(server_state_ == IPC_SERVER_STATE_READ_DONE);
 
   if (!IsClientRequestValid(msg_)) {
-    server_state_ = IPC_SERVER_STATE_DISCONNECTING;
+    EnterStateImmediately(IPC_SERVER_STATE_DISCONNECTING);
+    return;
+  }
+
+  if (msg_.tag == MESSAGE_TAG_UPLOAD_REQUEST) {
+    if (upload_request_callback_)
+      upload_request_callback_(upload_context_, msg_.id);
+    EnterStateImmediately(IPC_SERVER_STATE_DISCONNECTING);
     return;
   }
 
   scoped_ptr<ClientInfo> client_info(
       new ClientInfo(this,
-                     msg_.pid,
+                     msg_.id,
                      msg_.dump_type,
                      msg_.thread_id,
                      msg_.exception_pointers,
@@ -419,22 +438,26 @@ void CrashGenerationServer::HandleReadDoneState() {
                      msg_.custom_client_info));
 
   if (!client_info->Initialize()) {
-    server_state_ = IPC_SERVER_STATE_DISCONNECTING;
+    EnterStateImmediately(IPC_SERVER_STATE_DISCONNECTING);
     return;
   }
 
+  // Issues an asynchronous WriteFile call if successful.
+  // Iff successful, assigns ownership of the client_info pointer to the server
+  // instance, in which case we must be sure not to free it in this function.
   if (!RespondToClient(client_info.get())) {
-    server_state_ = IPC_SERVER_STATE_DISCONNECTING;
+    EnterStateImmediately(IPC_SERVER_STATE_DISCONNECTING);
     return;
   }
+
+  client_info_ = client_info.release();
 
   // Note that the asynchronous write issued by RespondToClient function
   // can finish before  the code below executes. But it is okay to change
   // state after issuing the asynchronous write. This is because even if
   // the asynchronous write is done, the callback for it would not be
   // executed until the current thread finishes its execution.
-  server_state_ = IPC_SERVER_STATE_WRITING;
-  client_info_ = client_info.release();
+  EnterStateWhenSignaled(IPC_SERVER_STATE_WRITING);
 }
 
 // When the server thread serving the clients is in the WRITING state,
@@ -449,21 +472,19 @@ void CrashGenerationServer::HandleWritingState() {
                                      &overlapped_,
                                      &bytes_count,
                                      FALSE) != FALSE;
+  DWORD error_code = success ? ERROR_SUCCESS : GetLastError();
 
   if (success) {
-    server_state_ = IPC_SERVER_STATE_WRITE_DONE;
+    EnterStateImmediately(IPC_SERVER_STATE_WRITE_DONE);
     return;
   }
-
-  DWORD error_code;
-  error_code = GetLastError();
 
   // We should never get an I/O incomplete since we should not execute this
   // unless the Write has finished and the overlapped event is signaled. If
   // we do get INCOMPLETE, we have a bug in our code.
   assert(error_code != ERROR_IO_INCOMPLETE);
 
-  server_state_ = IPC_SERVER_STATE_DISCONNECTING;
+  EnterStateImmediately(IPC_SERVER_STATE_DISCONNECTING);
 }
 
 // When the server thread serving the clients is in the WRITE_DONE state,
@@ -473,23 +494,20 @@ void CrashGenerationServer::HandleWritingState() {
 void CrashGenerationServer::HandleWriteDoneState() {
   assert(server_state_ == IPC_SERVER_STATE_WRITE_DONE);
 
-  server_state_ = IPC_SERVER_STATE_READING_ACK;
-
   DWORD bytes_count = 0;
   bool success = ReadFile(pipe_,
-                          &msg_,
-                          sizeof(msg_),
-                          &bytes_count,
-                          &overlapped_) != FALSE;
+                           &msg_,
+                           sizeof(msg_),
+                           &bytes_count,
+                           &overlapped_) != FALSE;
+  DWORD error_code = success ? ERROR_SUCCESS : GetLastError();
 
   if (success) {
-    return;
-  }
-
-  DWORD error_code = GetLastError();
-
-  if (error_code != ERROR_IO_PENDING) {
-    server_state_ = IPC_SERVER_STATE_DISCONNECTING;
+    EnterStateImmediately(IPC_SERVER_STATE_READING_ACK);
+  } else if (error_code == ERROR_IO_PENDING) {
+    EnterStateWhenSignaled(IPC_SERVER_STATE_READING_ACK);
+  } else {
+    EnterStateImmediately(IPC_SERVER_STATE_DISCONNECTING);
   }
 }
 
@@ -503,6 +521,7 @@ void CrashGenerationServer::HandleReadingAckState() {
                                      &overlapped_,
                                      &bytes_count,
                                      FALSE) != FALSE;
+  DWORD error_code = success ? ERROR_SUCCESS : GetLastError();
 
   if (success) {
     // The connection handshake with the client is now complete; perform
@@ -511,15 +530,13 @@ void CrashGenerationServer::HandleReadingAckState() {
       connect_callback_(connect_context_, client_info_);
     }
   } else {
-    DWORD error_code = GetLastError();
-
     // We should never get an I/O incomplete since we should not execute this
     // unless the Read has finished and the overlapped event is signaled. If
     // we do get INCOMPLETE, we have a bug in our code.
     assert(error_code != ERROR_IO_INCOMPLETE);
   }
 
-  server_state_ = IPC_SERVER_STATE_DISCONNECTING;
+  EnterStateImmediately(IPC_SERVER_STATE_DISCONNECTING);
 }
 
 // When the server thread serving the client is in the DISCONNECTING state,
@@ -539,12 +556,12 @@ void CrashGenerationServer::HandleDisconnectingState() {
   overlapped_.Pointer = NULL;
 
   if (!ResetEvent(overlapped_.hEvent)) {
-    server_state_ = IPC_SERVER_STATE_ERROR;
+    EnterErrorState();
     return;
   }
 
   if (!DisconnectNamedPipe(pipe_)) {
-    server_state_ = IPC_SERVER_STATE_ERROR;
+    EnterErrorState();
     return;
   }
 
@@ -554,7 +571,21 @@ void CrashGenerationServer::HandleDisconnectingState() {
     return;
   }
 
-  server_state_ = IPC_SERVER_STATE_INITIAL;
+  EnterStateImmediately(IPC_SERVER_STATE_INITIAL);
+}
+
+void CrashGenerationServer::EnterErrorState() {
+  SetEvent(overlapped_.hEvent);
+  server_state_ = IPC_SERVER_STATE_ERROR;
+}
+
+void CrashGenerationServer::EnterStateWhenSignaled(IPCServerState state) {
+  server_state_ = state;
+}
+
+void CrashGenerationServer::EnterStateImmediately(IPCServerState state) {
+  server_state_ = state;
+
   if (!SetEvent(overlapped_.hEvent)) {
     server_state_ = IPC_SERVER_STATE_ERROR;
   }
@@ -563,7 +594,7 @@ void CrashGenerationServer::HandleDisconnectingState() {
 bool CrashGenerationServer::PrepareReply(const ClientInfo& client_info,
                                          ProtocolMessage* reply) const {
   reply->tag = MESSAGE_TAG_REGISTRATION_RESPONSE;
-  reply->pid = GetCurrentProcessId();
+  reply->id = GetCurrentProcessId();
 
   if (CreateClientHandles(client_info, reply)) {
     return true;
@@ -626,18 +657,25 @@ bool CrashGenerationServer::RespondToClient(ClientInfo* client_info) {
     return false;
   }
 
+  DWORD bytes_count = 0;
+  bool success = WriteFile(pipe_,
+                            &reply,
+                            sizeof(reply),
+                            &bytes_count,
+                            &overlapped_) != FALSE;
+  DWORD error_code = success ? ERROR_SUCCESS : GetLastError();
+
+  if (!success && error_code != ERROR_IO_PENDING) {
+    return false;
+  }
+
+  // Takes over ownership of client_info. We MUST return true if AddClient
+  // succeeds.
   if (!AddClient(client_info)) {
     return false;
   }
 
-  DWORD bytes_count = 0;
-  bool success = WriteFile(pipe_,
-                           &reply,
-                           sizeof(reply),
-                           &bytes_count,
-                           &overlapped_) != FALSE;
-
-  return success || GetLastError() == ERROR_IO_PENDING;
+  return true;
 }
 
 // The server thread servicing the clients runs this method. The method
@@ -739,7 +777,7 @@ bool CrashGenerationServer::AddClient(ClientInfo* client_info) {
 
 // static
 void CALLBACK CrashGenerationServer::OnPipeConnected(void* context, BOOLEAN) {
-  assert (context);
+  assert(context);
 
   CrashGenerationServer* obj =
       reinterpret_cast<CrashGenerationServer*>(context);
@@ -767,6 +805,7 @@ void CALLBACK CrashGenerationServer::OnClientEnd(void* context, BOOLEAN) {
   CrashGenerationServer* crash_server = client_info->crash_server();
   assert(crash_server);
 
+  client_info->UnregisterWaits();
   InterlockedIncrement(&crash_server->cleanup_item_count_);
 
   if (!QueueUserWorkItem(CleanupClient, context, WT_EXECUTEDEFAULT)) {
