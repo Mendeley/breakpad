@@ -36,7 +36,7 @@ elseif(APPLE)
 			${CLIENT_SRC_DIR}/handler/minidump_generator.cc
 	)
 	add_library(breakpad ${CLIENT_LIB_SRCS})
-	target_link_libraries(breakpad crypto)
+	target_link_libraries(breakpad)
 elseif(UNIX)
 	set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/linux)
 	include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/linux/include)
