@@ -39,6 +39,10 @@
 #include "client/windows/handler/exception_handler.h"
 #include "common/windows/guid_string.h"
 
+#ifndef STATUS_INVALID_PARAMATER
+#define STATUS_INVALID_PARAMETER ((DWORD)0xC000000DL)
+#endif
+
 namespace google_breakpad {
 
 static const int kWaitForHandlerThreadMs = 60000;
