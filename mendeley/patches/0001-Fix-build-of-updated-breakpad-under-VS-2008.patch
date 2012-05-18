@@ -1,0 +1,35 @@
+From a49eab310d7ff577a7f84de3e9d3041d8d71adb5 Mon Sep 17 00:00:00 2001
+From: Robert Knight <robert.knight@mendeley.com>
+Date: Thu, 17 May 2012 16:44:09 +0100
+Subject: [PATCH 1/2] Fix build of updated breakpad under VS 2008
+
+Using the SDK provided with VS 2008, the STATUS_INVALID_PARAMETER
+constant is not defined.
+
+See http://code.google.com/p/google-breakpad/issues/detail?id=465
+for details.
+
+MD-18534 #time 20m
+unit-tests: other: Build fix.
+---
+ .../client/windows/handler/exception_handler.cc    |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/external/google-breakpad/src/client/windows/handler/exception_handler.cc b/external/google-breakpad/src/client/windows/handler/exception_handler.cc
+index 08c5fb5..d97c58a 100644
+--- a/external/google-breakpad/src/client/windows/handler/exception_handler.cc
++++ b/external/google-breakpad/src/client/windows/handler/exception_handler.cc
+@@ -39,6 +39,10 @@
+ #include "client/windows/handler/exception_handler.h"
+ #include "common/windows/guid_string.h"
+ 
++#ifndef STATUS_INVALID_PARAMATER
++#define STATUS_INVALID_PARAMETER ((DWORD)0xC000000DL)
++#endif
++
+ namespace google_breakpad {
+ 
+ static const int kWaitForHandlerThreadMs = 60000;
+-- 
+1.7.7.5 (Apple Git-26)
+

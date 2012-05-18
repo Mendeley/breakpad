@@ -1,0 +1,75 @@
+From 6d95903db573537f1d298b015b7e1530985b4552 Mon Sep 17 00:00:00 2001
+From: Robert Knight <robert.knight@mendeley.com>
+Date: Thu, 17 May 2012 17:12:42 +0100
+Subject: [PATCH 2/2] Re-apply our breakpad patch which terminates the process
+ immediately in the event of an unhandled exception.
+
+This was required to prevent deadlocks during shutdown after a crash
+on Windows XP.
+
+See http://stackoverflow.com/questions/8260742 for the original story.
+
+MD-18534 #time 30m
+unit-tests: other: No tests.
+---
+ .../client/windows/handler/exception_handler.cc    |    9 +++++++++
+ .../src/client/windows/handler/exception_handler.h |    9 +++++++++
+ 2 files changed, 18 insertions(+), 0 deletions(-)
+
+diff --git a/external/google-breakpad/src/client/windows/handler/exception_handler.cc b/external/google-breakpad/src/client/windows/handler/exception_handler.cc
+index d97c58a..721577a 100644
+--- a/external/google-breakpad/src/client/windows/handler/exception_handler.cc
++++ b/external/google-breakpad/src/client/windows/handler/exception_handler.cc
+@@ -128,6 +128,7 @@ void ExceptionHandler::Initialize(const wstring& dump_path,
+   assertion_ = NULL;
+   handler_return_value_ = false;
+   handle_debug_exceptions_ = false;
++  terminate_on_unhandled_exception_ = false;
+ 
+   // Attempt to use out-of-process if user has specified pipe name.
+   if (pipe_name != NULL) {
+@@ -451,6 +452,14 @@ LONG ExceptionHandler::HandleException(EXCEPTION_POINTERS* exinfo) {
+   // application to be restarted.
+   if (success) {
+     action = EXCEPTION_EXECUTE_HANDLER;
++	
++	// under Windows XP, returning EXCEPTION_EXECUTE_HANDLER results
++	// in ExitProcess() being called, which notifies loaded DLLs via DllMain()
++	// this can in turn cause crashes or hangs.  To prevent a hang, we
++	// terminate the process here
++	if (current_handler->terminate_on_unhandled_exception_) {
++      TerminateProcess(GetCurrentProcess(),1);
++	}
+   } else {
+     // There was an exception, it was a breakpoint or something else ignored
+     // above, or it was passed to the handler, which decided not to handle it.
+diff --git a/external/google-breakpad/src/client/windows/handler/exception_handler.h b/external/google-breakpad/src/client/windows/handler/exception_handler.h
+index 6c5ee76..9505e3f 100644
+--- a/external/google-breakpad/src/client/windows/handler/exception_handler.h
++++ b/external/google-breakpad/src/client/windows/handler/exception_handler.h
+@@ -205,6 +205,10 @@ class ExceptionHandler {
+     handle_debug_exceptions_ = handle_debug_exceptions;
+   }
+ 
++  void set_terminate_on_unhandled_exception(bool terminate) {
++    terminate_on_unhandled_exception_ = terminate;
++  }
++  
+   // Returns whether out-of-process dump generation is used or not.
+   bool IsOutOfProcess() const { return crash_generation_client_.get() != NULL; }
+ 
+@@ -391,6 +395,11 @@ class ExceptionHandler {
+   // EXCEPTION_SINGLE_STEP exceptions.  Leave this false (the default)
+   // to not interfere with debuggers.
+   bool handle_debug_exceptions_;
++  
++  // If true, ExceptionHandler will call TerminateProcess() if an
++  // exception is handled, instead of letting the default exception
++  // handler deal with the exception
++  bool terminate_on_unhandled_exception_;
+ 
+   // A stack of ExceptionHandler objects that have installed unhandled
+   // exception filters.  This vector is used by HandleException to determine
+-- 
+1.7.7.5 (Apple Git-26)
+
