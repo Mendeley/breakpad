@@ -1,4 +1,3 @@
-
 set(BREAKPAD_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
 if(WIN32)
@@ -12,6 +11,7 @@ if(WIN32)
 		${CLIENT_SRC_DIR}/crash_generation/minidump_generator.cc
 		${BREAKPAD_SRC_DIR}/common/windows/guid_string.cc
 	)
+	msvc_group_sources("${CLIENT_LIB_SRCS}")
 	add_library(breakpad ${CLIENT_LIB_SRCS})
 elseif(APPLE)
 	set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/mac)
