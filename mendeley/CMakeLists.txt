@@ -1,5 +1,16 @@
 set(BREAKPAD_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
+# Copy all entries in IN_LIST except those matching PATTERN
+# to OUT_VAR
+function(filter_list OUT_VAR IN_LIST PATTERN)
+	foreach(ITEM ${IN_LIST})
+		if (NOT (${ITEM} MATCHES ${PATTERN}))
+			set(OUT_LIST ${OUT_LIST} ${ITEM})
+		endif()
+	endforeach()
+	set(${OUT_VAR} ${OUT_LIST} PARENT_SCOPE)
+endfunction()
+
 if(WIN32)
 	set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/windows)
 	include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/windows/include)
@@ -16,18 +27,18 @@ if(WIN32)
 elseif(APPLE)
 	set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/mac)
 	include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/mac/include)
-	set(CLIENT_LIB_SRCS
+	add_definitions(-DHAVE_MACH_O_NLIST_H)
+	file(GLOB BREAKPADCOMMON_LIB_SRCS
+		${BREAKPAD_SRC_DIR}/common/*.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf/*.cc
+		${BREAKPAD_SRC_DIR}/common/mac/*.cc
+		${BREAKPAD_SRC_DIR}/common/mac/*.mm
+	)
+	filter_list(BREAKPADCOMMON_LIB_SRCS "${BREAKPADCOMMON_LIB_SRCS}" "_unittest")
+	add_library(breakpad_common ${BREAKPADCOMMON_LIB_SRCS})
+
+	set(BREAKPAD_LIB_SRCS)
 			${BREAKPAD_SRC_DIR}/client/minidump_file_writer.cc
-			${BREAKPAD_SRC_DIR}/common/convert_UTF.c
-			${BREAKPAD_SRC_DIR}/common/mac/bootstrap_compat.cc
-			${BREAKPAD_SRC_DIR}/common/mac/MachIPC.mm
-			${BREAKPAD_SRC_DIR}/common/mac/file_id.cc
-			${BREAKPAD_SRC_DIR}/common/mac/macho_id.cc
-			${BREAKPAD_SRC_DIR}/common/mac/macho_utilities.cc
-			${BREAKPAD_SRC_DIR}/common/mac/macho_walker.cc
-			${BREAKPAD_SRC_DIR}/common/mac/string_utilities.cc
-			${BREAKPAD_SRC_DIR}/common/md5.cc
-			${BREAKPAD_SRC_DIR}/common/string_conversion.cc
 			${CLIENT_SRC_DIR}/crash_generation/crash_generation_client.cc
 			${CLIENT_SRC_DIR}/crash_generation/crash_generation_server.cc
 			${CLIENT_SRC_DIR}/handler/breakpad_nlist_64.cc
@@ -35,8 +46,15 @@ elseif(APPLE)
 			${CLIENT_SRC_DIR}/handler/exception_handler.cc
 			${CLIENT_SRC_DIR}/handler/minidump_generator.cc
 	)
-	add_library(breakpad ${CLIENT_LIB_SRCS})
-	target_link_libraries(breakpad)
+	add_library(breakpad ${BREAKPAD_LIB_SRCS})
+	target_link_libraries(breakpad breakpad_common)
+
+	set(DUMPSYMS_SRCS
+		${BREAKPAD_SRC_DIR}/tools/mac/dump_syms/dump_syms_tool.mm
+	)
+	find_library(FOUNDATION_LIB Foundation REQUIRED)
+	add_executable(dumpsyms ${DUMPSYMS_SRCS})
+	target_link_libraries(dumpsyms breakpad_common ${FOUNDATION_LIB})
 elseif(UNIX)
 	set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/linux)
 	include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/linux/include)
