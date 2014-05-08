@@ -80,15 +80,32 @@ elseif(APPLE)
         add_executable(dump_syms ${DUMPSYMS_SRCS})
         target_link_libraries(dump_syms breakpad_common ${FOUNDATION_LIB})
 elseif(UNIX)
+	add_definitions(-DHAVE_A_OUT_H)
 	set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/linux)
 	include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/linux/include)
-	set(CLIENT_LIB_SRCS
+	set(BREAKPADCOMMON_LIB_SRCS
 		${BREAKPAD_SRC_DIR}/common/convert_UTF.c
+		${BREAKPAD_SRC_DIR}/common/language.cc
+		${BREAKPAD_SRC_DIR}/common/module.cc
+		${BREAKPAD_SRC_DIR}/common/stabs_reader.cc
+		${BREAKPAD_SRC_DIR}/common/stabs_to_module.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf_cfi_to_module.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf_line_to_module.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf_cu_to_module.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf/bytereader.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf/dwarf2diehandler.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf/dwarf2reader.cc
+		${BREAKPAD_SRC_DIR}/common/linux/dump_symbols.cc
+		${BREAKPAD_SRC_DIR}/common/linux/elf_symbols_to_module.cc
 		${BREAKPAD_SRC_DIR}/common/linux/file_id.cc
 		${BREAKPAD_SRC_DIR}/common/linux/guid_creator.cc
 		${BREAKPAD_SRC_DIR}/common/linux/memory_mapped_file.cc
 		${BREAKPAD_SRC_DIR}/common/linux/safe_readlink.cc
 		${BREAKPAD_SRC_DIR}/common/string_conversion.cc
+	)
+	add_library(breakpad_common ${BREAKPADCOMMON_LIB_SRCS})
+
+	set(BREAKPAD_LIB_SRCS
 		${CLIENT_SRC_DIR}/../minidump_file_writer.cc
 		${CLIENT_SRC_DIR}/crash_generation/crash_generation_client.cc
 		${CLIENT_SRC_DIR}/handler/exception_handler.cc
@@ -97,6 +114,12 @@ elseif(UNIX)
 		${CLIENT_SRC_DIR}/minidump_writer/linux_ptrace_dumper.cc
 		${CLIENT_SRC_DIR}/minidump_writer/minidump_writer.cc
 	)
-	add_library(breakpad ${CLIENT_LIB_SRCS})
+	add_library(breakpad ${BREAKPAD_LIB_SRCS})
+	target_link_libraries(breakpad breakpad_common)
+
+	set(DUMPSYMS_SRCS
+		${BREAKPAD_SRC_DIR}/tools/linux/dump_syms/dump_syms.cc)
+	add_executable(dump_syms ${DUMPSYMS_SRCS})
+	target_link_libraries(dump_syms breakpad_common)
 endif()
 
