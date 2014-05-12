@@ -1,16 +1,5 @@
 set(BREAKPAD_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
-# Copy all entries in IN_LIST except those matching PATTERN
-# to OUT_VAR
-function(filter_list OUT_VAR IN_LIST PATTERN)
-	foreach(ITEM ${IN_LIST})
-		if (NOT (${ITEM} MATCHES ${PATTERN}))
-			set(OUT_LIST ${OUT_LIST} ${ITEM})
-		endif()
-	endforeach()
-	set(${OUT_VAR} ${OUT_LIST} PARENT_SCOPE)
-endfunction()
-
 if(WIN32)
         set(DEBUG_ACCESS_SDK_DIR "$ENV{VSINSTALLDIR}/DIA SDK")
         if (NOT (EXISTS "${DEBUG_ACCESS_SDK_DIR}"))
@@ -18,10 +7,9 @@ if(WIN32)
         endif()
         include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/windows/include ${DEBUG_ACCESS_SDK_DIR}/include)
         set(BREAKPADCOMMON_LIB_SRCS
-                ${BREAKPAD_SRC_DIR}/common/windows/guid_string.cc
-                ${BREAKPAD_SRC_DIR}/common/windows/string_utils.cc
+			${BREAKPAD_SRC_DIR}/common/windows/guid_string.cc
+			${BREAKPAD_SRC_DIR}/common/windows/string_utils.cc
         )
-        filter_list(BREAKPADCOMMON_LIB_SRCS "${BREAKPADCOMMON_LIB_SRCS}" "_unittest")
 		set(BREAKPADCOMMON_LIBS Imagehlp)
 
         set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/windows)
@@ -34,8 +22,6 @@ if(WIN32)
 		)
         ide_group_sources("${BREAKPAD_LIB_SRCS}")
 
-        find_library(DIA_SDK_GUID_LIB diaguids PATHS ${DEBUG_ACCESS_SDK_DIR}/lib)
-
         set(DUMPSYMS_SRCS
                 # pdb_source_line_writer.cc is linked into the `dump_syms` target rather than
                 # `breakpad_common` to avoid a runtime dependency on the DIA SDK libs
@@ -43,6 +29,8 @@ if(WIN32)
                 ${BREAKPAD_SRC_DIR}/common/windows/pdb_source_line_writer.cc
                 ${BREAKPAD_SRC_DIR}/tools/windows/dump_syms/dump_syms.cc
         )
+
+        find_library(DIA_SDK_GUID_LIB diaguids PATHS ${DEBUG_ACCESS_SDK_DIR}/lib)
 		set(DUMPSYMS_LIBS ${DIA_SDK_GUID_LIB})
 elseif(APPLE)
 	set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/mac)
@@ -50,12 +38,16 @@ elseif(APPLE)
 	add_definitions(-DHAVE_MACH_O_NLIST_H)
 	file(GLOB BREAKPADCOMMON_LIB_SRCS
 		${BREAKPAD_SRC_DIR}/common/convert_UTF.c
-		${BREAKPAD_SRC_DIR}/common/*.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf/*.cc
-		${BREAKPAD_SRC_DIR}/common/mac/*.cc
-		${BREAKPAD_SRC_DIR}/common/mac/*.mm
+		${BREAKPAD_SRC_DIR}/common/mac/MachIPC.mm
+		${BREAKPAD_SRC_DIR}/common/mac/bootstrap_compat.cc
+		${BREAKPAD_SRC_DIR}/common/mac/file_id.cc
+		${BREAKPAD_SRC_DIR}/common/mac/macho_id.cc
+		${BREAKPAD_SRC_DIR}/common/mac/macho_utilities.cc
+		${BREAKPAD_SRC_DIR}/common/mac/macho_walker.cc
+		${BREAKPAD_SRC_DIR}/common/mac/string_utilities.cc
+		${BREAKPAD_SRC_DIR}/common/md5.cc
+		${BREAKPAD_SRC_DIR}/common/string_conversion.cc
 	)
-	filter_list(BREAKPADCOMMON_LIB_SRCS "${BREAKPADCOMMON_LIB_SRCS}" "_unittest")
 
 	set(BREAKPAD_LIB_SRCS
 		${BREAKPAD_SRC_DIR}/client/minidump_file_writer.cc
@@ -68,6 +60,18 @@ elseif(APPLE)
 	)
 
 	set(DUMPSYMS_SRCS
+		${BREAKPAD_SRC_DIR}/common/dwarf/bytereader.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf/dwarf2diehandler.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf/dwarf2reader.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf_cfi_to_module.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf_cu_to_module.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf_line_to_module.cc
+		${BREAKPAD_SRC_DIR}/common/language.cc
+		${BREAKPAD_SRC_DIR}/common/mac/dump_syms.mm
+		${BREAKPAD_SRC_DIR}/common/mac/macho_reader.cc
+		${BREAKPAD_SRC_DIR}/common/module.cc
+		${BREAKPAD_SRC_DIR}/common/stabs_reader.cc
+		${BREAKPAD_SRC_DIR}/common/stabs_to_module.cc
 		${BREAKPAD_SRC_DIR}/tools/mac/dump_syms/dump_syms_tool.mm
 	)
 	find_library(FOUNDATION_LIB Foundation REQUIRED)
@@ -79,18 +83,6 @@ elseif(UNIX)
 	include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/linux/include)
 	set(BREAKPADCOMMON_LIB_SRCS
 		${BREAKPAD_SRC_DIR}/common/convert_UTF.c
-		${BREAKPAD_SRC_DIR}/common/language.cc
-		${BREAKPAD_SRC_DIR}/common/module.cc
-		${BREAKPAD_SRC_DIR}/common/stabs_reader.cc
-		${BREAKPAD_SRC_DIR}/common/stabs_to_module.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf_cfi_to_module.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf_line_to_module.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf_cu_to_module.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf/bytereader.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf/dwarf2diehandler.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf/dwarf2reader.cc
-		${BREAKPAD_SRC_DIR}/common/linux/dump_symbols.cc
-		${BREAKPAD_SRC_DIR}/common/linux/elf_symbols_to_module.cc
 		${BREAKPAD_SRC_DIR}/common/linux/file_id.cc
 		${BREAKPAD_SRC_DIR}/common/linux/guid_creator.cc
 		${BREAKPAD_SRC_DIR}/common/linux/memory_mapped_file.cc
@@ -109,7 +101,20 @@ elseif(UNIX)
 	)
 	
 	set(DUMPSYMS_SRCS
-		${BREAKPAD_SRC_DIR}/tools/linux/dump_syms/dump_syms.cc)
+		${BREAKPAD_SRC_DIR}/common/dwarf/bytereader.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf/dwarf2diehandler.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf/dwarf2reader.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf_cfi_to_module.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf_cu_to_module.cc
+		${BREAKPAD_SRC_DIR}/common/dwarf_line_to_module.cc
+		${BREAKPAD_SRC_DIR}/common/language.cc
+		${BREAKPAD_SRC_DIR}/common/linux/dump_symbols.cc
+		${BREAKPAD_SRC_DIR}/common/linux/elf_symbols_to_module.cc
+		${BREAKPAD_SRC_DIR}/common/module.cc
+		${BREAKPAD_SRC_DIR}/common/stabs_reader.cc
+		${BREAKPAD_SRC_DIR}/common/stabs_to_module.cc
+		${BREAKPAD_SRC_DIR}/tools/linux/dump_syms/dump_syms.cc
+	)
 endif()
 
 add_library(breakpad_common ${BREAKPADCOMMON_LIB_SRCS})
