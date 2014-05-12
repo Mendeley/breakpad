@@ -22,20 +22,17 @@ if(WIN32)
                 ${BREAKPAD_SRC_DIR}/common/windows/string_utils.cc
         )
         filter_list(BREAKPADCOMMON_LIB_SRCS "${BREAKPADCOMMON_LIB_SRCS}" "_unittest")
-        add_library(breakpad_common ${BREAKPADCOMMON_LIB_SRCS})
-        target_link_libraries(breakpad_common Imagehlp)
+		set(BREAKPADCOMMON_LIBS Imagehlp)
 
         set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/windows)
         set(BREAKPAD_LIB_SRCS
-		${CLIENT_SRC_DIR}/handler/exception_handler.cc
-		${CLIENT_SRC_DIR}/crash_generation/client_info.cc
-		${CLIENT_SRC_DIR}/crash_generation/crash_generation_client.cc
-		${CLIENT_SRC_DIR}/crash_generation/crash_generation_server.cc
-                ${CLIENT_SRC_DIR}/crash_generation/minidump_generator.cc
-	)
+			${CLIENT_SRC_DIR}/handler/exception_handler.cc
+			${CLIENT_SRC_DIR}/crash_generation/client_info.cc
+			${CLIENT_SRC_DIR}/crash_generation/crash_generation_client.cc
+			${CLIENT_SRC_DIR}/crash_generation/crash_generation_server.cc
+			${CLIENT_SRC_DIR}/crash_generation/minidump_generator.cc
+		)
         ide_group_sources("${BREAKPAD_LIB_SRCS}")
-        add_library(breakpad ${BREAKPAD_LIB_SRCS})
-        target_link_libraries(breakpad breakpad_common)
 
         find_library(DIA_SDK_GUID_LIB diaguids PATHS ${DEBUG_ACCESS_SDK_DIR}/lib)
 
@@ -46,39 +43,36 @@ if(WIN32)
                 ${BREAKPAD_SRC_DIR}/common/windows/pdb_source_line_writer.cc
                 ${BREAKPAD_SRC_DIR}/tools/windows/dump_syms/dump_syms.cc
         )
-        add_executable(dump_syms ${DUMPSYMS_SRCS})
-        target_link_libraries(dump_syms breakpad_common ${DIA_SDK_GUID_LIB})
+		set(DUMPSYMS_LIBS ${DIA_SDK_GUID_LIB})
 elseif(APPLE)
 	set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/mac)
 	include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/mac/include)
 	add_definitions(-DHAVE_MACH_O_NLIST_H)
 	file(GLOB BREAKPADCOMMON_LIB_SRCS
+		${BREAKPAD_SRC_DIR}/common/convert_UTF.c
 		${BREAKPAD_SRC_DIR}/common/*.cc
 		${BREAKPAD_SRC_DIR}/common/dwarf/*.cc
 		${BREAKPAD_SRC_DIR}/common/mac/*.cc
 		${BREAKPAD_SRC_DIR}/common/mac/*.mm
 	)
 	filter_list(BREAKPADCOMMON_LIB_SRCS "${BREAKPADCOMMON_LIB_SRCS}" "_unittest")
-	add_library(breakpad_common ${BREAKPADCOMMON_LIB_SRCS})
 
-        set(BREAKPAD_LIB_SRCS
-			${BREAKPAD_SRC_DIR}/client/minidump_file_writer.cc
-			${CLIENT_SRC_DIR}/crash_generation/crash_generation_client.cc
-			${CLIENT_SRC_DIR}/crash_generation/crash_generation_server.cc
-			${CLIENT_SRC_DIR}/handler/breakpad_nlist_64.cc
-			${CLIENT_SRC_DIR}/handler/dynamic_images.cc
-			${CLIENT_SRC_DIR}/handler/exception_handler.cc
-			${CLIENT_SRC_DIR}/handler/minidump_generator.cc
+	set(BREAKPAD_LIB_SRCS
+		${BREAKPAD_SRC_DIR}/client/minidump_file_writer.cc
+		${CLIENT_SRC_DIR}/crash_generation/crash_generation_client.cc
+		${CLIENT_SRC_DIR}/crash_generation/crash_generation_server.cc
+		${CLIENT_SRC_DIR}/handler/breakpad_nlist_64.cc
+		${CLIENT_SRC_DIR}/handler/dynamic_images.cc
+		${CLIENT_SRC_DIR}/handler/exception_handler.cc
+		${CLIENT_SRC_DIR}/handler/minidump_generator.cc
 	)
-	add_library(breakpad ${BREAKPAD_LIB_SRCS})
-	target_link_libraries(breakpad breakpad_common)
 
 	set(DUMPSYMS_SRCS
 		${BREAKPAD_SRC_DIR}/tools/mac/dump_syms/dump_syms_tool.mm
 	)
 	find_library(FOUNDATION_LIB Foundation REQUIRED)
-        add_executable(dump_syms ${DUMPSYMS_SRCS})
-        target_link_libraries(dump_syms breakpad_common ${FOUNDATION_LIB})
+	set(DUMPSYMS_LIBS ${FOUNDATION_LIB})
+
 elseif(UNIX)
 	add_definitions(-DHAVE_A_OUT_H)
 	set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/linux)
@@ -103,7 +97,6 @@ elseif(UNIX)
 		${BREAKPAD_SRC_DIR}/common/linux/safe_readlink.cc
 		${BREAKPAD_SRC_DIR}/common/string_conversion.cc
 	)
-	add_library(breakpad_common ${BREAKPADCOMMON_LIB_SRCS})
 
 	set(BREAKPAD_LIB_SRCS
 		${CLIENT_SRC_DIR}/../minidump_file_writer.cc
@@ -114,12 +107,21 @@ elseif(UNIX)
 		${CLIENT_SRC_DIR}/minidump_writer/linux_ptrace_dumper.cc
 		${CLIENT_SRC_DIR}/minidump_writer/minidump_writer.cc
 	)
-	add_library(breakpad ${BREAKPAD_LIB_SRCS})
-	target_link_libraries(breakpad breakpad_common)
-
+	
 	set(DUMPSYMS_SRCS
 		${BREAKPAD_SRC_DIR}/tools/linux/dump_syms/dump_syms.cc)
-	add_executable(dump_syms ${DUMPSYMS_SRCS})
-	target_link_libraries(dump_syms breakpad_common)
 endif()
+
+add_library(breakpad_common ${BREAKPADCOMMON_LIB_SRCS})
+target_link_libraries(breakpad_common ${BREAKPADCOMMON_LIBS})
+
+# client library for capturing minidumps when a crash
+# occurs
+add_library(breakpad ${BREAKPAD_LIB_SRCS})
+target_link_libraries(breakpad breakpad_common)
+
+# dump_syms - Tool for producing cross-platform .sym files
+# from a binary with debug info
+add_executable(dump_syms ${DUMPSYMS_SRCS})
+target_link_libraries(dump_syms breakpad_common ${DUMPSYMS_LIBS})
 
