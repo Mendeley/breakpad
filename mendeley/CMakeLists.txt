@@ -117,6 +117,7 @@ elseif(UNIX)
 	)
 endif()
 
+
 add_library(breakpad_common ${BREAKPADCOMMON_LIB_SRCS})
 target_link_libraries(breakpad_common ${BREAKPADCOMMON_LIBS})
 
@@ -129,4 +130,54 @@ target_link_libraries(breakpad breakpad_common)
 # from a binary with debug info
 add_executable(dump_syms ${DUMPSYMS_SRCS})
 target_link_libraries(dump_syms breakpad_common ${DUMPSYMS_LIBS})
+
+# minidump_stackwalk - A tool for producing a stacktrace
+# from a minidump using debug symbol files produced by dump_syms
+set(LIBDISASM_DIR ${BREAKPAD_SRC_DIR}/third_party/libdisasm)
+set(LIBDISASM_SRCS
+  ${LIBDISASM_DIR}/ia32_implicit.c
+  ${LIBDISASM_DIR}/ia32_insn.c
+  ${LIBDISASM_DIR}/ia32_invariant.c
+  ${LIBDISASM_DIR}/ia32_modrm.c
+  ${LIBDISASM_DIR}/ia32_invariant.c
+  ${LIBDISASM_DIR}/ia32_opcode_tables.c
+  ${LIBDISASM_DIR}/ia32_operand.c
+  ${LIBDISASM_DIR}/ia32_reg.c
+  ${LIBDISASM_DIR}/ia32_settings.c
+  ${LIBDISASM_DIR}/x86_disasm.c
+  ${LIBDISASM_DIR}/x86_format.c
+  ${LIBDISASM_DIR}/x86_imm.c
+  ${LIBDISASM_DIR}/x86_insn.c
+  ${LIBDISASM_DIR}/x86_misc.c
+  ${LIBDISASM_DIR}/x86_operand_list.c
+)
+add_library(disasm ${LIBDISASM_SRCS})
+
+set(PROCESSOR_SRC_DIR ${BREAKPAD_SRC_DIR}/processor)
+set(MINIDUMP_STACKWALK_SRCS
+  ${PROCESSOR_SRC_DIR}/basic_source_line_resolver.cc
+  ${PROCESSOR_SRC_DIR}/basic_code_modules.cc
+  ${PROCESSOR_SRC_DIR}/call_stack.cc
+  ${PROCESSOR_SRC_DIR}/cfi_frame_info.cc
+  ${PROCESSOR_SRC_DIR}/disassembler_x86.cc
+  ${PROCESSOR_SRC_DIR}/exploitability.cc
+  ${PROCESSOR_SRC_DIR}/exploitability_win.cc
+  ${PROCESSOR_SRC_DIR}/logging.cc
+  ${PROCESSOR_SRC_DIR}/minidump.cc
+  ${PROCESSOR_SRC_DIR}/minidump_processor.cc
+  ${PROCESSOR_SRC_DIR}/minidump_stackwalk.cc
+  ${PROCESSOR_SRC_DIR}/pathname_stripper.cc
+  ${PROCESSOR_SRC_DIR}/process_state.cc
+  ${PROCESSOR_SRC_DIR}/simple_symbol_supplier.cc
+  ${PROCESSOR_SRC_DIR}/stackwalker.cc
+  ${PROCESSOR_SRC_DIR}/stackwalker_amd64.cc
+  ${PROCESSOR_SRC_DIR}/stackwalker_arm.cc
+  ${PROCESSOR_SRC_DIR}/stackwalker_ppc.cc
+  ${PROCESSOR_SRC_DIR}/stackwalker_sparc.cc
+  ${PROCESSOR_SRC_DIR}/stackwalker_x86.cc
+  ${PROCESSOR_SRC_DIR}/source_line_resolver_base.cc
+  ${PROCESSOR_SRC_DIR}/tokenize.cc
+)
+add_executable(minidump_stackwalk ${MINIDUMP_STACKWALK_SRCS})
+target_link_libraries(minidump_stackwalk disasm)
 
