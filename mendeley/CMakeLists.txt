@@ -162,6 +162,7 @@ set(MINIDUMP_STACKWALK_SRCS
   ${PROCESSOR_SRC_DIR}/disassembler_x86.cc
   ${PROCESSOR_SRC_DIR}/exploitability.cc
   ${PROCESSOR_SRC_DIR}/exploitability_win.cc
+  ${PROCESSOR_SRC_DIR}/external_symbol_supplier.cc
   ${PROCESSOR_SRC_DIR}/logging.cc
   ${PROCESSOR_SRC_DIR}/minidump.cc
   ${PROCESSOR_SRC_DIR}/minidump_processor.cc

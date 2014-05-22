@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -47,6 +48,7 @@
 #include "google_breakpad/processor/minidump_processor.h"
 #include "google_breakpad/processor/process_state.h"
 #include "google_breakpad/processor/stack_frame_cpu.h"
+#include "processor/external_symbol_supplier.h"
 #include "processor/logging.h"
 #include "processor/pathname_stripper.h"
 #include "processor/scoped_ptr.h"
@@ -60,6 +62,7 @@ using google_breakpad::BasicSourceLineResolver;
 using google_breakpad::CallStack;
 using google_breakpad::CodeModule;
 using google_breakpad::CodeModules;
+using google_breakpad::ExternalSymbolSupplier;
 using google_breakpad::MinidumpModule;
 using google_breakpad::MinidumpProcessor;
 using google_breakpad::PathnameStripper;
@@ -72,6 +75,7 @@ using google_breakpad::StackFrameSPARC;
 using google_breakpad::StackFrameX86;
 using google_breakpad::StackFrameAMD64;
 using google_breakpad::StackFrameARM;
+using google_breakpad::SymbolSupplier;
 
 // Separator character for machine readable output.
 static const char kOutputSeparator = '|';
@@ -512,9 +516,12 @@ static void PrintProcessStateMachineReadable(const ProcessState& process_state)
 // is printed to stdout.
 static bool PrintMinidumpProcess(const string &minidump_file,
                                  const vector<string> &symbol_paths,
-                                 bool machine_readable) {
-  scoped_ptr<SimpleSymbolSupplier> symbol_supplier;
-  if (!symbol_paths.empty()) {
+                                 bool machine_readable,
+                                 const string& symbol_fetch_command) {
+  scoped_ptr<SymbolSupplier> symbol_supplier;
+  if (!symbol_fetch_command.empty()) {
+    symbol_supplier.reset(new ExternalSymbolSupplier(symbol_fetch_command));
+  } else if (!symbol_paths.empty()) {
     // TODO(mmentovai): check existence of symbol_path if specified?
     symbol_supplier.reset(new SimpleSymbolSupplier(symbol_paths));
   }
@@ -542,8 +549,9 @@ static bool PrintMinidumpProcess(const string &minidump_file,
 }  // namespace
 
 static void usage(const char *program_name) {
-  fprintf(stderr, "usage: %s [-m] <minidump-file> [symbol-path ...]\n"
-          "    -m : Output in machine-readable format\n",
+  fprintf(stderr, "usage: %s [-m] [-e <symbol-fetch-command>] <minidump-file> [symbol-path ...]\n"
+          "    -m : Output in machine-readable format\n"
+		  "    -e : Run <symbol-fetch-command> to fetch symbols for a file",
           program_name);
 }
 
@@ -555,33 +563,42 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  const char *minidump_file;
+  string minidump_file;
   bool machine_readable;
   int symbol_path_arg;
+  string symbol_fetch_command;
+  std::vector<std::string> symbol_paths;
 
-  if (strcmp(argv[1], "-m") == 0) {
-    if (argc < 3) {
+  for (int i=1; i < argc; i++) {
+    string arg(argv[i]);
+    if (arg == "-h" || arg == "--help") {
       usage(argv[0]);
-      return 1;
+      return 0;
+    } else if (arg == "-m") {
+      machine_readable = true;
+    } else if (arg == "-e") {
+      ++i;
+      if (i >= argc) {
+        usage(argv[0]);
+        return 1;
+      }
+      symbol_fetch_command = string(argv[i]);
+    } else {
+      if (minidump_file.empty()) {
+        minidump_file = argv[i];
+      } else {
+        symbol_paths.push_back(arg);
+      }
     }
-
-    machine_readable = true;
-    minidump_file = argv[2];
-    symbol_path_arg = 3;
-  } else {
-    machine_readable = false;
-    minidump_file = argv[1];
-    symbol_path_arg = 2;
   }
 
-  // extra arguments are symbol paths
-  std::vector<std::string> symbol_paths;
-  if (argc > symbol_path_arg) {
-    for (int argi = symbol_path_arg; argi < argc; ++argi)
-      symbol_paths.push_back(argv[argi]);
+  if (minidump_file.empty()) {
+    usage(argv[0]);
+    return 1;
   }
 
   return PrintMinidumpProcess(minidump_file,
-                              symbol_paths,
-                              machine_readable) ? 0 : 1;
+      symbol_paths,
+      machine_readable,
+      symbol_fetch_command) ? 0 : 1;
 }
