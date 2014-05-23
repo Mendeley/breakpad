@@ -29,6 +29,8 @@
 
 #include "client/mac/crash_generation/crash_generation_server.h"
 
+#include <pthread.h>
+
 #include "client/mac/crash_generation/client_info.h"
 #include "client/mac/handler/minidump_generator.h"
 #include "common/mac/scoped_task_suspend-inl.h"
