@@ -193,3 +193,6 @@ if (UNIX)
   target_link_libraries(minidump_stackwalk disasm)
 endif()
 
+enable_testing()
+add_subdirectory(test)
+
