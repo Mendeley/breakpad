@@ -1,8 +1,15 @@
+project(breakpad)
+cmake_minimum_required(VERSION 2.8)
+
 set(BREAKPAD_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
 if(WIN32)
         set(DEBUG_ACCESS_SDK_DIR "$ENV{VSINSTALLDIR}/DIA SDK")
         if (NOT (EXISTS "${DEBUG_ACCESS_SDK_DIR}"))
+            # The Debug Access SDK is required to build the dump_syms tool.
+            # It ships with the pro versions of Visual Studio 2008 and 2010 but not
+            # the express versions. It is available separately as part of the Windows SDK
+            # however.
             message(FATAL_ERROR "Debug Access SDK not found in ${DEBUG_ACCESS_SDK_DIR}")
         endif()
         include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/windows/include ${DEBUG_ACCESS_SDK_DIR}/include)
@@ -10,7 +17,7 @@ if(WIN32)
 			${BREAKPAD_SRC_DIR}/common/windows/guid_string.cc
 			${BREAKPAD_SRC_DIR}/common/windows/string_utils.cc
         )
-		set(BREAKPADCOMMON_LIBS Imagehlp)
+        set(BREAKPADCOMMON_LIBS Imagehlp)
 
         set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/windows)
         set(BREAKPAD_LIB_SRCS
@@ -117,11 +124,10 @@ elseif(UNIX)
 	)
 endif()
 
-
 add_library(breakpad_common ${BREAKPADCOMMON_LIB_SRCS})
 target_link_libraries(breakpad_common ${BREAKPADCOMMON_LIBS})
 
-# client library for capturing minidumps when a crash
+# breakpad - client library for capturing minidumps when a crash
 # occurs
 add_library(breakpad ${BREAKPAD_LIB_SRCS})
 target_link_libraries(breakpad breakpad_common)
