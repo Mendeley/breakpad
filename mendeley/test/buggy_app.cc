@@ -6,6 +6,8 @@
 #include "client/mac/handler/exception_handler.h"
 #elif defined(WIN32)
 #include "client/windows/handler/exception_handler.h"
+#include <locale>
+#include <codecvt>
 #endif
 
 using std::string;
@@ -31,8 +33,9 @@ void setupBreakpad(const string& outputDirectory) {
 		0    /* port name, set to null so in-process dump generation is used. */
 	);
 #elif defined(WIN32)
+	std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> strConv;
 	exception_handler = new google_breakpad::ExceptionHandler(
-		outputDirectory, /* minidump output directory */
+		strConv.from_bytes(outputDirectory), /* minidump output directory */
 		0,   /* filter */
 		0,   /* minidump callback */
 		0,   /* calback_context */
