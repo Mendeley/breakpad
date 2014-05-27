@@ -96,6 +96,8 @@ elseif(UNIX)
 		${BREAKPAD_SRC_DIR}/common/linux/safe_readlink.cc
 		${BREAKPAD_SRC_DIR}/common/string_conversion.cc
 	)
+	find_package(Threads)
+	set(BREAKPADCOMMON_LIBS ${CMAKE_THREAD_LIBS_INIT})
 
 	set(BREAKPAD_LIB_SRCS
 		${CLIENT_SRC_DIR}/../minidump_file_writer.cc
