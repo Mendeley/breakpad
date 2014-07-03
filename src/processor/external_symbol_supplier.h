@@ -19,37 +19,39 @@ using std::string;
 // status if symbols could not be found for the given binary.
 //
 class ExternalSymbolSupplier : public SymbolSupplier {
-	public:
+  public:
 
   // Construct an ExternalSymbolSupplier which runs fetch_command
   // to retreive debug symbols for a code module
-	ExternalSymbolSupplier(const string& fetch_command);
+  ExternalSymbolSupplier(const string& fetch_command);
 
   // implements SymbolSupplier.
 
   // the GetSymbolFile() functions are non-implemented stubs.
   // minidump_stackwalk only uses the GetCStringSymbolData() function
-	virtual SymbolResult GetSymbolFile(const CodeModule *module,
-	                                   const SystemInfo *system_info,
-	                                   string *symbol_file);
-	virtual SymbolResult GetSymbolFile(const CodeModule *module,
-	                                   const SystemInfo *system_info,
+  virtual SymbolResult GetSymbolFile(const CodeModule *module,
+                                     const SystemInfo *system_info,
+                                     string *symbol_file);
+  virtual SymbolResult GetSymbolFile(const CodeModule *module,
+                                     const SystemInfo *system_info,
                                      string *symbol_file,
-	                                   string *symbol_data);
+                                     string *symbol_data);
 
-	virtual SymbolResult GetCStringSymbolData(const CodeModule *module,
-	                                   const SystemInfo *system_info,
-	                                   string *symbol_file,
-	                                   char **symbol_data);
-	virtual void FreeSymbolData(const CodeModule *module);
+  virtual SymbolResult GetCStringSymbolData(const CodeModule *module,
+                                     const SystemInfo *system_info,
+                                     string *symbol_file,
+                                     char **symbol_data);
+  virtual void FreeSymbolData(const CodeModule *module);
 
-	private:
-		// external command to run to locate the symbol file
-		string symbol_fetch_command_;
+  private:
+    // external command to run to locate the symbol file
+    // and return its contents
+    string symbol_fetch_command_;
 
-		// and return its contents
-		// map from binary filename to content
-		map<string, string> symbol_cache_;
+    // map from binary filename to content or a null
+    // string if the external command was previously run
+    // but failed to find any content for the given module
+    map<string, string> symbol_cache_;
 };
 
 }

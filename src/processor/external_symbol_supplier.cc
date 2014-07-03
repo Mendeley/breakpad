@@ -38,8 +38,14 @@ SymbolSupplier::SymbolResult ExternalSymbolSupplier::GetCStringSymbolData(const 
   // search for already-loaded debug info
   map<string,string>::const_iterator it = symbol_cache_.find(module->code_file());
   if (it != symbol_cache_.end()) {
-    *symbol_data = const_cast<char*>(symbol_cache_[module->code_file()].data());
-    return FOUND;
+    const std::string& content = it->second;
+    if (content.empty()) {
+      // debug info has been requested before but was not found previously
+      return NOT_FOUND;
+    } else {
+      *symbol_data = const_cast<char*>(content.data());
+      return FOUND;
+    }
   }
 
   // run external command to fetch debug info
@@ -72,7 +78,9 @@ SymbolSupplier::SymbolResult ExternalSymbolSupplier::GetCStringSymbolData(const 
   }
 
   if (exitCode != 0) {
-    // no matching debug info found
+    // no matching debug info found,
+    // cache the omission to avoid repeated lookups for the same module
+    symbol_cache_[module->code_file()] = std::string();
     BPLOG_INFO << "No symbols found with " << fetch_command.str() << " (status: " << exitCode << ")";
     return NOT_FOUND;
   }
