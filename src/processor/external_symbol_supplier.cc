@@ -31,6 +31,36 @@ SymbolSupplier::SymbolResult ExternalSymbolSupplier::GetSymbolFile(const CodeMod
   return INTERRUPT;
 }
 
+std::string ShellEscape(const std::string& arg)
+{
+  std::string result = "'";
+  for (int i=0; i < arg.size(); i++) {
+    if (arg[i] == '\'') {
+      result += '\\';
+    }
+    result += arg[i];
+  }
+  result += "'";
+  return result;
+}
+
+// Returns the part of 'path' following the final trailing slash.
+//
+// To support both Windows and Unix minidump paths, both '\' and '/'
+// are considered path component separators.
+std::string FileBasename(const std::string& path)
+{
+  int basename_start_pos = path.size();
+  while (basename_start_pos > 0) {
+    if (path[basename_start_pos-1] == '/' ||
+        path[basename_start_pos-1] == '\\') {
+      break;
+    }
+    --basename_start_pos;
+  }
+  return path.substr(basename_start_pos);
+}
+
 SymbolSupplier::SymbolResult ExternalSymbolSupplier::GetCStringSymbolData(const CodeModule *module,
                                        const SystemInfo *system_info,
                                        string *symbol_file,
@@ -49,9 +79,10 @@ SymbolSupplier::SymbolResult ExternalSymbolSupplier::GetCStringSymbolData(const 
   }
 
   // run external command to fetch debug info
+  std::string debug_file_basename = FileBasename(module->debug_file());
   stringstream symbol_content;
   stringstream fetch_command;
-  fetch_command << symbol_fetch_command_ << " " << module->debug_file() << " " << module->debug_identifier();
+  fetch_command << symbol_fetch_command_ << " " << ShellEscape(debug_file_basename) << " " << ShellEscape(module->debug_identifier());
   FILE *child_proc = popen(fetch_command.str().data(), "r");
   if (!child_proc) {
     BPLOG_ERROR << "Failed to start symbol fetcher " << fetch_command.str();
