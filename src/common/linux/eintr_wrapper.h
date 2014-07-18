@@ -32,12 +32,14 @@
 
 #include <errno.h>
 
+#include "common/linux/typeof.h"
+
 // This provides a wrapper around system calls which may be interrupted by a
 // signal and return EINTR. See man 7 signal.
 //
 
 #define HANDLE_EINTR(x) ({ \
-  typeof(x) __eintr_result__; \
+  TYPEOF(x) __eintr_result__; \
   do { \
     __eintr_result__ = x; \
   } while (__eintr_result__ == -1 && errno == EINTR); \
