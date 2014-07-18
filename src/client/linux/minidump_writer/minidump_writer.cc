@@ -76,6 +76,7 @@
 #include "client/linux/minidump_writer/minidump_extension_linux.h"
 #include "client/minidump_file_writer.h"
 #include "common/linux/linux_libc_support.h"
+#include "common/linux/typeof.h"
 #include "google_breakpad/common/minidump_format.h"
 #include "third_party/lss/linux_syscall_support.h"
 
@@ -557,14 +558,14 @@ class MinidumpWriter {
           uint64_t ret;
           /* char redzone[128]; */
         } seccomp_stackframe;
-        if (top - offsetof(typeof(seccomp_stackframe), deadbeef) < old_top ||
-            top - offsetof(typeof(seccomp_stackframe), deadbeef) +
+        if (top - offsetof(TYPEOF(seccomp_stackframe), deadbeef) < old_top ||
+            top - offsetof(TYPEOF(seccomp_stackframe), deadbeef) +
             sizeof(seccomp_stackframe) >
             thread.stack.start_of_memory_range+thread.stack.memory.data_size) {
           break;
         }
         memcpy(&seccomp_stackframe,
-               bp_addr - offsetof(typeof(seccomp_stackframe), deadbeef),
+               bp_addr - offsetof(TYPEOF(seccomp_stackframe), deadbeef),
                sizeof(seccomp_stackframe));
         cpu->rbx = seccomp_stackframe.rbx;
         cpu->rcx = seccomp_stackframe.rcx;
@@ -611,14 +612,14 @@ class MinidumpWriter {
           uint32_t fakeret;
           uint32_t ret;
         } seccomp_stackframe;
-        if (top - offsetof(typeof(seccomp_stackframe), deadbeef) < old_top ||
-            top - offsetof(typeof(seccomp_stackframe), deadbeef) +
+        if (top - offsetof(TYPEOF(seccomp_stackframe), deadbeef) < old_top ||
+            top - offsetof(TYPEOF(seccomp_stackframe), deadbeef) +
             sizeof(seccomp_stackframe) >
             thread.stack.start_of_memory_range+thread.stack.memory.data_size) {
           break;
         }
         memcpy(&seccomp_stackframe,
-               bp_addr - offsetof(typeof(seccomp_stackframe), deadbeef),
+               bp_addr - offsetof(TYPEOF(seccomp_stackframe), deadbeef),
                sizeof(seccomp_stackframe));
         cpu->ebx = seccomp_stackframe.ebx;
         cpu->ecx = seccomp_stackframe.ecx;
