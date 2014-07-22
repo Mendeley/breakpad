@@ -10,6 +10,13 @@ endif()
 add_executable(buggy_app buggy_app.cc)
 target_link_libraries(buggy_app ${BREAKPAD_LIBS})
 
+# the test app must be built with at least basic
+# debug info in order to successfully extract function
+# names from it
+if (UNIX)
+  set_target_properties(buggy_app PROPERTIES COMPILE_FLAGS -g)
+endif()
+
 if (UNIX)
   # the test currently relies on minidump_stackwalk which is currently only built
   # under Linux/Mac
