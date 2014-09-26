@@ -46,7 +46,8 @@ def main():
     parser.add_argument('-s', type=str,
       action='append',
       dest='symbol_servers',
-      help='Add a symbol server to search for available symbols')
+      help='Add a symbol server to search for available symbols',
+      required=True)
     parser.add_argument('binary_name', type=str, help='The file name (excluding the path) of the executable or shared library', action='store')
     parser.add_argument('debug_id', type=str, help='The debug/build identifier for the version of the binary referenced in a minidump', action='store')
     opts = parser.parse_args()
