@@ -66,7 +66,7 @@ def main():
         sys.exit(0)
 
     for server in opts.symbol_servers:
-        symbol_url = '%s/%s' % (server, rel_path)
+        symbol_url = '%s/%s' % (server, urllib2.quote(rel_path))
 
         print('Symbols for %s not found in cache, fetching from %s' % (binary_name, symbol_url), file=sys.stderr)
 
