@@ -18,6 +18,7 @@ import argparse
 import urllib2
 import os
 import tempfile
+import time
 import sys
 
 # path to local symbol cache for faster retrieval in future
@@ -39,6 +40,9 @@ CACHE_ROOT = '%s/%s' % (tempfile.gettempdir(), 'symbol-cache')
 # MSFT_SYMBOL_SERVER_URL = 'http://msdl.microsoft.com/download/symbols'
 # MSFT_SYMBOL_STORE_USER_AGENT = "Microsoft-Symbol-Server/10.0.0.0"
 
+# Length of time to remember failed cache lookups for in seconds
+MAX_MISSING_CACHE_AGE = 300
+
 def main():
     parser = argparse.ArgumentParser(
 """Fetch symbol files for a binary from Mendeley Desktop's symbol server and cache them locally.
@@ -58,6 +62,7 @@ def main():
 
     rel_path = '%s/%s/%s.sym' % (binary_name, debug_id, binary_basename)
     cache_path = '%s/%s' % (CACHE_ROOT, rel_path)
+    missing_entry_cache_path = '%s.failed' % cache_path
 
     if os.path.exists(cache_path):
         print('Found %s in cache' % rel_path, file=sys.stderr)
@@ -68,23 +73,40 @@ def main():
     for server in opts.symbol_servers:
         symbol_url = '%s/%s' % (server, urllib2.quote(rel_path))
 
+        if os.path.isfile(missing_entry_cache_path):
+            cache_age = time.time() - os.path.getmtime(missing_entry_cache_path)
+            if cache_age < MAX_MISSING_CACHE_AGE:
+               print('Symbols for %s not found in cache but failed lookup cached %d seconds ago' % (binary_name, cache_age), file=sys.stderr)
+               continue
+
         print('Symbols for %s not found in cache, fetching from %s' % (binary_name, symbol_url), file=sys.stderr)
+        
+        mkpath(os.path.dirname(cache_path))
 
         try:
             url_req = urllib2.Request(symbol_url)
             url_reply = urllib2.urlopen(url_req)
             data = url_reply.read()
             print('Successfully retrieved symbols', file=sys.stderr)
+            print('Saving to cache as %s' % (cache_path), file=sys.stderr)
             print(data, file=sys.stdout)
 
             # save to local cache for future use
-            mkpath(os.path.dirname(cache_path))
             cache_file = open(cache_path, 'w')
             cache_file.write(data)
             cache_file.close()
 
+            if os.path.isfile(missing_entry_cache_path):
+                os.remove(missing_entry_cache_path)
+
         except urllib2.HTTPError as err:
             print('Symbols not found for %s: %s' % (binary_name, err), file=sys.stderr)
+            print('Caching miss in %s' % (missing_entry_cache_path), file=sys.stderr)
+
+            symbols_missing_file = open(missing_entry_cache_path, 'w')
+            symbols_missing_file.write(symbol_url)
+            symbols_missing_file.close()
+
             sys.exit(1)
 
 if __name__ == '__main__':
