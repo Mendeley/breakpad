@@ -19,7 +19,7 @@ import sys
 
 import minidump_stackwalk_processor
 
-def run_stackwalk(minidump_tool, dump_file, symbol_fetch_command, verbose = False):
+def run_stackwalk(minidump_tool, dump_file, symbol_fetch_command, verbose = False, raw = False):
     stderr_output = subprocess.PIPE
     if verbose:
         stderr_output = sys.stderr
@@ -27,6 +27,11 @@ def run_stackwalk(minidump_tool, dump_file, symbol_fetch_command, verbose = Fals
     proc = subprocess.Popen([minidump_tool, '-m', dump_file, '-e', symbol_fetch_command],
       stdout=subprocess.PIPE, stderr=stderr_output)
     stdout, stderr = proc.communicate()
+
+    if raw:
+        for line in stdout.splitlines():
+            print(line)
+        return
 
     trace = minidump_stackwalk_processor.Stacktrace.parse(stdout)
     main_module = trace.modules[trace.main_module]
@@ -46,6 +51,7 @@ def main():
     parser = argparse.ArgumentParser(description="Produce a stack trace from a minidump")
     parser.add_argument('dump_file', action='store', type=str, help='Path to minidump file')
     parser.add_argument('-v', action='store_true', dest='verbose', help='Display verbose output from minidump_stackwalk')
+    parser.add_argument('--raw', action='store_true', dest='raw', help='Display raw output from minidump_stackwalk')
     args = parser.parse_args()
     
     minidump_tool = os.environ.get('MINIDUMP_STACKWALK_PATH')
@@ -63,7 +69,7 @@ def main():
     sym_fetch_tool = os.path.abspath(os.path.dirname(__file__) + '/fetch-symbols.py')
     sym_fetch_command = '%s -s \"%s\"' % (sym_fetch_tool, sym_url)
 
-    run_stackwalk(minidump_tool, args.dump_file, sym_fetch_command, verbose=args.verbose)
+    run_stackwalk(minidump_tool, args.dump_file, sym_fetch_command, verbose=args.verbose, raw=args.raw)
 
 if __name__ == '__main__':
     main()
