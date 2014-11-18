@@ -19,7 +19,15 @@ import sys
 
 import minidump_stackwalk_processor
 
-def run_stackwalk(minidump_tool, dump_file, symbol_fetch_command, verbose = False, raw = False):
+def print_pretty_trace(trace, thread_id):
+    print('\nStacktrace for thread %s:' % (thread_id))
+    for frame in trace.threads[thread_id]:
+        if frame.function:
+            print('  %s' % frame.function)
+        else:
+            print('  [Unknown in %s]' % frame.module)
+
+def run_stackwalk(minidump_tool, dump_file, symbol_fetch_command, verbose = False, raw = False, all_threads = False):
     stderr_output = subprocess.PIPE
     if verbose:
         stderr_output = sys.stderr
@@ -38,20 +46,24 @@ def run_stackwalk(minidump_tool, dump_file, symbol_fetch_command, verbose = Fals
     version = main_module.version or 'Unknown version'
 
     print('App: %s (%s)' % (main_module.filename, version))
-    print('Crash: %s in thread %s' % (trace.crash_info.type, trace.crash_info.thread_id))
+
+    if trace.crash_info:
+        print('Crash: %s in thread %s' % (trace.crash_info.type, trace.crash_info.thread_id))
+
     print('OS: %s %s' % (trace.os_version.platform, trace.os_version.build_id))
-    print('\nStacktrace for thread %s:' % (trace.crash_info.thread_id)) 
-    for frame in trace.threads[trace.crash_info.thread_id]:
-        if frame.function:
-            print('  %s' % frame.function)
-        else:
-            print('  [Unknown in %s]' % frame.module)
+
+    if trace.crash_info and (not all_threads):
+        print_pretty_trace(trace, thread.crash_info.thread_id)
+    else:
+        for key in trace.threads.keys():
+            print_pretty_trace(trace, key)
 
 def main():
     parser = argparse.ArgumentParser(description="Produce a stack trace from a minidump")
     parser.add_argument('dump_file', action='store', type=str, help='Path to minidump file')
     parser.add_argument('-v', action='store_true', dest='verbose', help='Display verbose output from minidump_stackwalk')
     parser.add_argument('--raw', action='store_true', dest='raw', help='Display raw output from minidump_stackwalk')
+    parser.add_argument('-a', action='store_true', dest='all_threads', help='Display stacktrace for all threads')
     args = parser.parse_args()
     
     minidump_tool = os.environ.get('MINIDUMP_STACKWALK_PATH')
@@ -69,7 +81,10 @@ def main():
     sym_fetch_tool = os.path.abspath(os.path.dirname(__file__) + '/fetch-symbols.py')
     sym_fetch_command = '%s -s \"%s\"' % (sym_fetch_tool, sym_url)
 
-    run_stackwalk(minidump_tool, args.dump_file, sym_fetch_command, verbose=args.verbose, raw=args.raw)
+    run_stackwalk(minidump_tool, args.dump_file, sym_fetch_command,
+      verbose=args.verbose,
+      raw=args.raw,
+      all_threads=args.all_threads)
 
 if __name__ == '__main__':
     main()

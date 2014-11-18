@@ -98,7 +98,8 @@ class Stacktrace:
                 cpu_info = CpuInfo(cpu_type, cpu_model, int(cores))
             elif entry_type == 'Crash':
                 crash_type, crash_addr, crash_thread = fields[1:]
-                crash_info = CrashInfo(crash_type, crash_addr, int(crash_thread))
+                if crash_type != 'No crash':
+                    crash_info = CrashInfo(crash_type, crash_addr, int(crash_thread))
             elif entry_type == 'Module':
                 filename, version, debug_filename, debug_id, base_addr, max_addr, is_main = fields[1:]
                 is_main = bool(int(is_main))
