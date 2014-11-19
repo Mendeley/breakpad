@@ -53,7 +53,7 @@ def run_stackwalk(minidump_tool, dump_file, symbol_fetch_command, verbose = Fals
     print('OS: %s %s' % (trace.os_version.platform, trace.os_version.build_id))
 
     if trace.crash_info and (not all_threads):
-        print_pretty_trace(trace, thread.crash_info.thread_id)
+        print_pretty_trace(trace, trace.crash_info.thread_id)
     else:
         for key in trace.threads.keys():
             print_pretty_trace(trace, key)
