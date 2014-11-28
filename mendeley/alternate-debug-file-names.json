@@ -1,0 +1,5 @@
+{
+    "__comment__" : "This config file specifies alternative debug file names to try if debug symbols are not found under the debug file name given in the binary.",
+    "mendeleydesktop" : ["mendeleydesktop.i486","mendeleydesktop.x86_64"]
+}
+

@@ -78,8 +78,10 @@ def main():
               where debug symbols are hosted.""")
         sys.exit(1)
 
+    alt_names_config_file = '%s/alternate-debug-file-names.json' % (os.path.dirname(os.path.abspath(__file__)))
+
     sym_fetch_tool = os.path.abspath(os.path.dirname(__file__) + '/fetch-symbols.py')
-    sym_fetch_command = '%s -s \"%s\"' % (sym_fetch_tool, sym_url)
+    sym_fetch_command = '%s -a %s -s \"%s\"' % (sym_fetch_tool, alt_names_config_file, sym_url)
 
     run_stackwalk(minidump_tool, args.dump_file, sym_fetch_command,
       verbose=args.verbose,
