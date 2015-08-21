@@ -72,11 +72,13 @@ class scoped_ptr {
 
   ~scoped_ptr() {
     typedef char type_must_be_complete[sizeof(T)];
+    (void) sizeof(type_must_be_complete);
     delete ptr;
   }
 
   void reset(T* p = 0) {
     typedef char type_must_be_complete[sizeof(T)];
+    (void) sizeof(type_must_be_complete);
 
     if (ptr != p) {
       delete ptr;
@@ -161,11 +163,13 @@ class scoped_array {
 
   ~scoped_array() {
     typedef char type_must_be_complete[sizeof(T)];
+    (void) sizeof(type_must_be_complete);
     delete[] ptr;
   }
 
   void reset(T* p = 0) {
     typedef char type_must_be_complete[sizeof(T)];
+    (void) sizeof(type_must_be_complete);
 
     if (ptr != p) {
       delete [] ptr;
@@ -255,11 +259,13 @@ class scoped_ptr_malloc {
 
   ~scoped_ptr_malloc() {
     typedef char type_must_be_complete[sizeof(T)];
+    (void) sizeof(type_must_be_complete);
     free_((void*) ptr);
   }
 
   void reset(T* p = 0) {
     typedef char type_must_be_complete[sizeof(T)];
+    (void) sizeof(type_must_be_complete);
 
     if (ptr != p) {
       free_((void*) ptr);
