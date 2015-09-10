@@ -198,3 +198,13 @@ endif()
 enable_testing()
 add_subdirectory(test)
 
+set_target_properties(
+	breakpad_common
+	breakpad
+	dump_syms
+	# ONLY on UNIX:
+	#disasm
+	#minidump_stackwalk
+	PROPERTIES
+		FOLDER "Externals/breakpad"
+)

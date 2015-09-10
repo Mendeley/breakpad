@@ -23,3 +23,9 @@ if (UNIX)
   add_test(stacktrace_test python ${CMAKE_CURRENT_SOURCE_DIR}/stacktrace_test.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 endif()
+
+set_target_properties(
+	buggy_app
+	PROPERTIES 
+		FOLDER "Externals/breakpad"
+)
