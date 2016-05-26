@@ -8,6 +8,8 @@ import os
 import subprocess
 import sys
 
+IS_MAC = sys.platform == 'darwin'
+
 def main():
     parser = argparse.ArgumentParser('Stacktrace dump test')
     parser.add_argument('--symbols', help='Dump symbols for binary', action='store_true')
@@ -36,7 +38,13 @@ def main():
         stackfile = open('stacktrace.txt', 'w+')
         minidump_log = open('stackwalk-log.txt', 'w')
 
-        subprocess.call([dump_syms_path, buggy_app_path], stdout=symfile)
+        dump_syms_platform_options = []
+        if IS_MAC:
+            # See utilities/ci/debug_symbols.py and/or buildtool/debug_symbols.py:
+            # on OS-X we only dump x86_64 symbols.
+            dump_syms_platform_options = ['-a', 'x86_64']
+
+        subprocess.call([dump_syms_path] + dump_syms_platform_options + [buggy_app_path], stdout=symfile)
         subprocess.call([buggy_app_path])
 
         dump_files = glob.glob('*.dmp')
