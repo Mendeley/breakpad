@@ -49,7 +49,18 @@ void setupBreakpad(const string& outputDirectory) {
 #endif
 }
 
+// This variable is NOT used - it only exists to avoid
+// the compiler to inline the function aBuggyFunction
+// so we can have a full backtrace.
+int avoidInlineFunction = 1;
+
 void aBuggyFunction() {
+	if (avoidInlineFunction == 2)
+	{
+		// It never uses this code path, it only exists to avoid
+		// this function to be inlined.
+		aBuggyFunction();
+	}
 	int* invalid_ptr = reinterpret_cast<int*>(0x42);
 	*invalid_ptr = 0xdeadbeef;
 }
