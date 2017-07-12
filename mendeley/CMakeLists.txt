@@ -4,6 +4,7 @@ cmake_minimum_required(VERSION 2.8)
 set(BREAKPAD_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
 if(WIN32)
+		add_definitions(-D_SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS)
         set(DEBUG_ACCESS_SDK_DIR "$ENV{VSINSTALLDIR}/DIA SDK")
         if (NOT (EXISTS "${DEBUG_ACCESS_SDK_DIR}"))
             # The Debug Access SDK is required to build the dump_syms tool.
