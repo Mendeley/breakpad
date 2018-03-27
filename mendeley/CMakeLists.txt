@@ -4,6 +4,8 @@ cmake_minimum_required(VERSION 2.8)
 set(BREAKPAD_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
 if(WIN32)
+		ADD_DEFINITIONS(-DUNICODE)
+		ADD_DEFINITIONS(-D_UNICODE)
 		add_definitions(-D_SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS)
         set(DEBUG_ACCESS_SDK_DIR "$ENV{VSINSTALLDIR}/DIA SDK")
         if (NOT (EXISTS "${DEBUG_ACCESS_SDK_DIR}"))
@@ -11,7 +13,7 @@ if(WIN32)
             # It ships with the pro versions of Visual Studio 2008 and 2010 but not
             # the express versions. It is available separately as part of the Windows SDK
             # however.
-            message(FATAL_ERROR "Debug Access SDK not found in ${DEBUG_ACCESS_SDK_DIR}")
+            message(FATAL_ERROR "Debug Access SDK not found in ${DEBUG_ACCESS_SDK_DIR}. Please check that the VSINSTALLDIR environment variable points to your Visual Studio installation directory.")
         endif()
         include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/windows/include ${DEBUG_ACCESS_SDK_DIR}/include)
         set(BREAKPADCOMMON_LIB_SRCS
@@ -28,7 +30,7 @@ if(WIN32)
 			${CLIENT_SRC_DIR}/crash_generation/crash_generation_server.cc
 			${CLIENT_SRC_DIR}/crash_generation/minidump_generator.cc
 		)
-        ide_group_sources("${BREAKPAD_LIB_SRCS}")
+        source_group("Sources" FILES ${BREAKPAD_LIB_SRCS})
 
         set(DUMPSYMS_SRCS
                 # pdb_source_line_writer.cc is linked into the `dump_syms` target rather than
@@ -38,8 +40,13 @@ if(WIN32)
                 ${BREAKPAD_SRC_DIR}/tools/windows/dump_syms/dump_syms.cc
         )
 
-        find_library(DIA_SDK_GUID_LIB diaguids PATHS ${DEBUG_ACCESS_SDK_DIR}/lib)
-		set(DUMPSYMS_LIBS ${DIA_SDK_GUID_LIB})
+        if(NOT "${CMAKE_GENERATOR}" MATCHES "(Win64|IA64)")
+            find_library(DIA_SDK_GUID_LIB diaguids PATHS ${DEBUG_ACCESS_SDK_DIR}/lib)
+        else()
+            find_library(DIA_SDK_GUID_LIB diaguids PATHS ${DEBUG_ACCESS_SDK_DIR}/lib/amd64)
+        endif()
+
+        set(DUMPSYMS_LIBS ${DIA_SDK_GUID_LIB})
 elseif(APPLE)
 	set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/mac)
 	include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/mac/include)
