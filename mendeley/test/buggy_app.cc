@@ -17,11 +17,12 @@ void setupBreakpad(const string& outputDirectory) {
 
 #if defined(__linux)
 	exception_handler = new google_breakpad::ExceptionHandler(
-		outputDirectory, /* minidump output directory */
+		google_breakpad::MinidumpDescriptor(outputDirectory), /* minidump output directory */
 		0,   /* filter */
 		0,   /* minidump callback */
 		0,   /* callback_context */
-		true /* install_handler */
+		true, /* install_handler */
+		-1
 	);
 #elif defined(__APPLE__)
 	exception_handler = new google_breakpad::ExceptionHandler(
@@ -41,11 +42,6 @@ void setupBreakpad(const string& outputDirectory) {
 		0,   /* calback_context */
 		google_breakpad::ExceptionHandler::HANDLER_ALL /* handler_types */
 	);
-
-	// call TerminateProcess() to prevent any further code from
-	// executing once a minidump file has been written following a
-	// crash.  See ticket #17814
-	exception_handler->set_terminate_on_unhandled_exception(true);
 #endif
 }
 

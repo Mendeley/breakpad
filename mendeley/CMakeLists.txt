@@ -43,11 +43,15 @@ if(WIN32)
 		)
         ide_group_sources("${BREAKPAD_LIB_SRCS}")
 
-        set(DUMPSYMS_SRCS
+        set(LIB_DUMPSYMS_SRCS
                 # pdb_source_line_writer.cc is linked into the `dump_syms` target rather than
                 # `breakpad_common` to avoid a runtime dependency on the DIA SDK libs
                 # in the breakpad client library
+                ${BREAKPAD_SRC_DIR}/common/windows/omap.cc
+                ${BREAKPAD_SRC_DIR}/common/windows/dia_util.cc
                 ${BREAKPAD_SRC_DIR}/common/windows/pdb_source_line_writer.cc
+        )
+        set(DUMPSYMS_SRCS
                 ${BREAKPAD_SRC_DIR}/tools/windows/dump_syms/dump_syms.cc
         )
 
@@ -101,11 +105,15 @@ elseif(UNIX)
 	include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/linux/include)
 	set(BREAKPADCOMMON_LIB_SRCS
 		${BREAKPAD_SRC_DIR}/common/convert_UTF.c
+		${BREAKPAD_SRC_DIR}/common/linux/elfutils.cc
 		${BREAKPAD_SRC_DIR}/common/linux/file_id.cc
 		${BREAKPAD_SRC_DIR}/common/linux/guid_creator.cc
+		${BREAKPAD_SRC_DIR}/common/linux/linux_libc_support.cc
 		${BREAKPAD_SRC_DIR}/common/linux/memory_mapped_file.cc
 		${BREAKPAD_SRC_DIR}/common/linux/safe_readlink.cc
+		${BREAKPAD_SRC_DIR}/common/linux/crc32.cc
 		${BREAKPAD_SRC_DIR}/common/string_conversion.cc
+		${BREAKPAD_SRC_DIR}/common/path_helper.cc
 	)
 	find_package(Threads)
 	set(BREAKPADCOMMON_LIBS ${CMAKE_THREAD_LIBS_INIT})
@@ -113,14 +121,18 @@ elseif(UNIX)
 	set(BREAKPAD_LIB_SRCS
 		${BREAKPAD_SRC_DIR}/client/minidump_file_writer.cc
 		${CLIENT_SRC_DIR}/crash_generation/crash_generation_client.cc
+		${CLIENT_SRC_DIR}/dump_writer_common/ucontext_reader.cc
+		${CLIENT_SRC_DIR}/dump_writer_common/thread_info.cc
+		${CLIENT_SRC_DIR}/handler/minidump_descriptor.cc
 		${CLIENT_SRC_DIR}/handler/exception_handler.cc
 		${CLIENT_SRC_DIR}/log/log.cc
 		${CLIENT_SRC_DIR}/minidump_writer/linux_dumper.cc
 		${CLIENT_SRC_DIR}/minidump_writer/linux_ptrace_dumper.cc
 		${CLIENT_SRC_DIR}/minidump_writer/minidump_writer.cc
+		${CLIENT_SRC_DIR}/microdump_writer/microdump_writer.cc
 	)
 	
-	set(DUMPSYMS_SRCS ${UNIX_DUMPSYMS_COMMON_SRC}
+	set(LIB_DUMPSYMS_SRCS ${UNIX_DUMPSYMS_COMMON_SRC}
 		${BREAKPAD_SRC_DIR}/common/linux/dump_symbols.cc
 		${BREAKPAD_SRC_DIR}/common/linux/elf_symbols_to_module.cc
     )
@@ -131,12 +143,12 @@ elseif(UNIX)
 endif()
 
 add_library(breakpad_common ${BREAKPADCOMMON_LIB_SRCS})
-target_link_libraries(breakpad_common ${BREAKPADCOMMON_LIBS})
+target_link_libraries(breakpad_common PUBLIC ${BREAKPADCOMMON_LIBS})
 
 # breakpad - client library for capturing minidumps when a crash
 # occurs
 add_library(breakpad ${BREAKPAD_LIB_SRCS})
-target_link_libraries(breakpad breakpad_common)
+target_link_libraries(breakpad PUBLIC breakpad_common)
 
 # dump_syms - Tool for producing cross-platform .sym files
 # from a binary with debug info
@@ -144,7 +156,7 @@ add_library(dumpsyms STATIC ${LIB_DUMPSYMS_SRCS})
 target_link_libraries(dumpsyms PUBLIC breakpad_common ${DUMPSYMS_LIBS})
 
 add_executable(dump_syms ${DUMPSYMS_SRCS})
-target_link_libraries(dump_syms breakpad_common dumpsyms ${DUMPSYMS_LIBS})
+target_link_libraries(dump_syms PUBLIC breakpad_common dumpsyms ${DUMPSYMS_LIBS})
 
 # minidump_stackwalk - A tool for producing a stacktrace
 # from a minidump using debug symbol files produced by dump_syms
@@ -242,14 +254,16 @@ set_target_properties(
 foreach(tgt breakpad_client breakpad_common disasm dumpsyms dump_syms minidump_processor minidump_stackwalk)
     if(TARGET ${tgt})
         set_target_properties(${tgt} PROPERTIES AUTOMOC OFF)
-        target_compile_options(
-            ${tgt}
-            PRIVATE
-                -Wno-redeclared-class-member
-                -Wno-deprecated-declarations
-                -Wno-tautological-compare
-                -Wno-tautological-constant-out-of-range-compare
-        )
+        if(NOT WIN32)
+            target_compile_options(
+                ${tgt}
+                PRIVATE
+                    -Wno-redeclared-class-member
+                    -Wno-deprecated-declarations
+                    -Wno-tautological-compare
+                    -Wno-tautological-constant-out-of-range-compare
+            )
+        endif()
     endif()
 endforeach()
 
