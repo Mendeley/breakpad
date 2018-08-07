@@ -43,6 +43,7 @@
 #include <map>
 #include <string>
 
+#include "google_breakpad/common/breakpad_types.h"
 #include "google_breakpad/processor/source_line_resolver_base.h"
 #include "google_breakpad/processor/stack_frame.h"
 #include "processor/cfi_frame_info.h"
@@ -84,9 +85,10 @@ struct SourceLineResolverBase::Function {
   Function(const string &function_name,
            MemAddr function_address,
            MemAddr code_size,
-           int set_parameter_size)
+           int set_parameter_size,
+           bool is_multiple)
       : name(function_name), address(function_address), size(code_size),
-        parameter_size(set_parameter_size) { }
+        parameter_size(set_parameter_size), is_multiple(is_multiple) { }
 
   string name;
   MemAddr address;
@@ -94,16 +96,21 @@ struct SourceLineResolverBase::Function {
 
   // The size of parameters passed to this function on the stack.
   int32_t parameter_size;
+
+  // If the function's instructions correspond to multiple symbols.
+  bool is_multiple;
 };
 
 struct SourceLineResolverBase::PublicSymbol {
   PublicSymbol() { }
   PublicSymbol(const string& set_name,
                MemAddr set_address,
-               int set_parameter_size)
+               int set_parameter_size,
+               bool is_multiple)
       : name(set_name),
         address(set_address),
-        parameter_size(set_parameter_size) {}
+        parameter_size(set_parameter_size),
+        is_multiple(is_multiple) {}
 
   string name;
   MemAddr address;
@@ -112,6 +119,9 @@ struct SourceLineResolverBase::PublicSymbol {
   // is set to the size of the parameters passed to the funciton on the
   // stack, if known.
   int32_t parameter_size;
+
+  // If the function's instructions correspond to multiple symbols.
+  bool is_multiple;
 };
 
 class SourceLineResolverBase::Module {
@@ -120,7 +130,15 @@ class SourceLineResolverBase::Module {
   // Loads a map from the given buffer in char* type.
   // Does NOT take ownership of memory_buffer (the caller, source line resolver,
   // is the owner of memory_buffer).
-  virtual bool LoadMapFromMemory(char *memory_buffer) = 0;
+  // The passed in |memory buffer| is of size |memory_buffer_size|.  If it is
+  // not null terminated, LoadMapFromMemory will null terminate it by modifying
+  // the passed in buffer.
+  virtual bool LoadMapFromMemory(char *memory_buffer,
+                                 size_t memory_buffer_size) = 0;
+
+  // Tells whether the loaded symbol data is corrupt.  Return value is
+  // undefined, if the symbol data hasn't been loaded yet.
+  virtual bool IsCorrupt() const = 0;
 
   // Looks up the given relative address, and fills the StackFrame struct
   // with the result.

@@ -35,7 +35,12 @@
 #ifndef GOOGLE_BREAKPAD_PROCESSOR_CODE_MODULES_H__
 #define GOOGLE_BREAKPAD_PROCESSOR_CODE_MODULES_H__
 
+#include <stddef.h>
+
+#include <vector>
+
 #include "google_breakpad/common/breakpad_types.h"
+#include "processor/linked_ptr.h"
 
 namespace google_breakpad {
 
@@ -53,7 +58,7 @@ class CodeModules {
   // address, returns NULL.  Ownership of the returned CodeModule is retained
   // by the CodeModules object; pointers returned by this method are valid for
   // comparison with pointers returned by the other Get methods.
-  virtual const CodeModule* GetModuleForAddress(u_int64_t address) const = 0;
+  virtual const CodeModule* GetModuleForAddress(uint64_t address) const = 0;
 
   // Returns the module corresponding to the main executable.  If there is
   // no main executable, returns NULL.  Ownership of the returned CodeModule
@@ -91,6 +96,14 @@ class CodeModules {
   // returns objects in may differ between a copy and the original CodeModules
   // object.
   virtual const CodeModules* Copy() const = 0;
+
+  // Returns a vector of all modules which address ranges needed to be shrunk
+  // down due to address range conflicts with other modules.
+  virtual std::vector<linked_ptr<const CodeModule> >
+  GetShrunkRangeModules() const = 0;
+
+  // Returns true, if module address range shrink is enabled.
+  virtual bool IsModuleShrinkEnabled() const = 0;
 };
 
 }  // namespace google_breakpad

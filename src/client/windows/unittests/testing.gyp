@@ -1,5 +1,4 @@
-# Copyright (c) 2010, Google Inc.
-# All rights reserved.
+# Copyright 2010 Google Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -29,48 +28,62 @@
 
 {
   'includes': [
-    '../build/common.gypi',
+    '../../../build/common.gypi',
   ],
   'target_defaults': {
   },
   'targets': [
     {
       'target_name': 'gtest',
-      'type': '<(library)',
+      'type': 'static_library',
       'include_dirs': [
         '<(DEPTH)/testing/include',
-        '<(DEPTH)/testing/gtest',
-        '<(DEPTH)/testing/gtest/include',
+        '<(DEPTH)/testing/googletest/include',
+        '<(DEPTH)/testing/googletest',
+        '<(DEPTH)/testing',
       ],
       'sources': [
-        '<(DEPTH)/testing/gtest/src/gtest-all.cc',
+        '<(DEPTH)/testing/googletest/src/gtest-all.cc',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
           '<(DEPTH)/testing/include',
           '<(DEPTH)/testing/gtest/include',
-        ]
+        ],
+        # Visual C++ implements variadic templates strangely, and
+        # VC++2012 broke Google Test by lowering this value. See
+        # http://stackoverflow.com/questions/12558327/google-test-in-visual-studio-2012
+        'defines': ['_VARIADIC_MAX=10'],
       },
+      'defines': ['_VARIADIC_MAX=10'],
     },
     {
       'target_name': 'gmock',
-      'type': '<(library)',
+      'type': 'static_library',
       'include_dirs': [
         '<(DEPTH)/testing/include',
-        '<(DEPTH)/testing/',
-        '<(DEPTH)/testing/gtest',
-        '<(DEPTH)/testing/gtest/include',
+        '<(DEPTH)/testing/googletest/include',
+        '<(DEPTH)/testing/googletest',
+        '<(DEPTH)/testing/googlemock/include',
+        '<(DEPTH)/testing/googlemock',
+        '<(DEPTH)/testing',
       ],
       'sources': [
-        '<(DEPTH)/testing/src/gmock-all.cc',
-        '<(DEPTH)/testing/src/gmock_main.cc',
+        '<(DEPTH)/testing/googlemock/src/gmock-all.cc',
+        '<(DEPTH)/testing/googletest/src/gtest_main.cc',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
           '<(DEPTH)/testing/include',
-          '<(DEPTH)/testing/gtest/include',
-        ]
+          '<(DEPTH)/testing/googletest/include',
+          '<(DEPTH)/testing/googletest',
+          '<(DEPTH)/testing/googlemock/include',
+          '<(DEPTH)/testing/googlemock',
+          '<(DEPTH)/testing',
+        ],
+        'defines': ['_VARIADIC_MAX=10'],
       },
+      'defines': ['_VARIADIC_MAX=10'],
     },
 
   ],

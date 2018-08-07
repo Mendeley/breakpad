@@ -1,10 +1,23 @@
 project(breakpad)
-cmake_minimum_required(VERSION 2.8)
 
 set(BREAKPAD_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
+set(UNIX_DUMPSYMS_COMMON_SRC
+    ${BREAKPAD_SRC_DIR}/common/dwarf/bytereader.cc
+    ${BREAKPAD_SRC_DIR}/common/dwarf/dwarf2diehandler.cc
+    ${BREAKPAD_SRC_DIR}/common/dwarf/dwarf2reader.cc
+    ${BREAKPAD_SRC_DIR}/common/dwarf/elf_reader.cc
+    ${BREAKPAD_SRC_DIR}/common/dwarf_cfi_to_module.cc
+    ${BREAKPAD_SRC_DIR}/common/dwarf_cu_to_module.cc
+    ${BREAKPAD_SRC_DIR}/common/dwarf_line_to_module.cc
+    ${BREAKPAD_SRC_DIR}/common/language.cc
+    ${BREAKPAD_SRC_DIR}/common/module.cc
+    ${BREAKPAD_SRC_DIR}/common/stabs_reader.cc
+    ${BREAKPAD_SRC_DIR}/common/stabs_to_module.cc
+)
+
 if(WIN32)
-		add_definitions(-D_SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS)
+	add_definitions(-D_SILENCE_STDEXT_HASH_DEPRECATION_WARNINGS)
         set(DEBUG_ACCESS_SDK_DIR "$ENV{VSINSTALLDIR}/DIA SDK")
         if (NOT (EXISTS "${DEBUG_ACCESS_SDK_DIR}"))
             # The Debug Access SDK is required to build the dump_syms tool.
@@ -40,6 +53,7 @@ if(WIN32)
 
         find_library(DIA_SDK_GUID_LIB diaguids PATHS ${DEBUG_ACCESS_SDK_DIR}/lib)
 		set(DUMPSYMS_LIBS ${DIA_SDK_GUID_LIB})
+
 elseif(APPLE)
 	set(CLIENT_SRC_DIR ${BREAKPAD_SRC_DIR}/client/mac)
 	include_directories(${BREAKPAD_SRC_DIR} ${BREAKPAD_SRC_DIR}/third_party/mac/include)
@@ -53,8 +67,10 @@ elseif(APPLE)
 		${BREAKPAD_SRC_DIR}/common/mac/macho_utilities.cc
 		${BREAKPAD_SRC_DIR}/common/mac/macho_walker.cc
 		${BREAKPAD_SRC_DIR}/common/mac/string_utilities.cc
+		${BREAKPAD_SRC_DIR}/common/mac/arch_utilities.cc
 		${BREAKPAD_SRC_DIR}/common/md5.cc
 		${BREAKPAD_SRC_DIR}/common/string_conversion.cc
+		${BREAKPAD_SRC_DIR}/common/path_helper.cc
 	)
 
 	set(BREAKPAD_LIB_SRCS
@@ -67,21 +83,15 @@ elseif(APPLE)
 		${CLIENT_SRC_DIR}/handler/minidump_generator.cc
 	)
 
-	set(DUMPSYMS_SRCS
-		${BREAKPAD_SRC_DIR}/common/dwarf/bytereader.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf/dwarf2diehandler.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf/dwarf2reader.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf_cfi_to_module.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf_cu_to_module.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf_line_to_module.cc
-		${BREAKPAD_SRC_DIR}/common/language.cc
-		${BREAKPAD_SRC_DIR}/common/mac/dump_syms.mm
+	set(LIB_DUMPSYMS_SRCS ${UNIX_DUMPSYMS_COMMON_SRC}
+		${BREAKPAD_SRC_DIR}/common/mac/dump_syms.cc
 		${BREAKPAD_SRC_DIR}/common/mac/macho_reader.cc
-		${BREAKPAD_SRC_DIR}/common/module.cc
-		${BREAKPAD_SRC_DIR}/common/stabs_reader.cc
-		${BREAKPAD_SRC_DIR}/common/stabs_to_module.cc
-		${BREAKPAD_SRC_DIR}/tools/mac/dump_syms/dump_syms_tool.mm
+    )
+
+    set(DUMPSYMS_SRCS
+		${BREAKPAD_SRC_DIR}/tools/mac/dump_syms/dump_syms_tool.cc
 	)
+
 	find_library(FOUNDATION_LIB Foundation REQUIRED)
 	set(DUMPSYMS_LIBS ${FOUNDATION_LIB})
 
@@ -101,7 +111,7 @@ elseif(UNIX)
 	set(BREAKPADCOMMON_LIBS ${CMAKE_THREAD_LIBS_INIT})
 
 	set(BREAKPAD_LIB_SRCS
-		${CLIENT_SRC_DIR}/../minidump_file_writer.cc
+		${BREAKPAD_SRC_DIR}/client/minidump_file_writer.cc
 		${CLIENT_SRC_DIR}/crash_generation/crash_generation_client.cc
 		${CLIENT_SRC_DIR}/handler/exception_handler.cc
 		${CLIENT_SRC_DIR}/log/log.cc
@@ -110,19 +120,12 @@ elseif(UNIX)
 		${CLIENT_SRC_DIR}/minidump_writer/minidump_writer.cc
 	)
 	
-	set(DUMPSYMS_SRCS
-		${BREAKPAD_SRC_DIR}/common/dwarf/bytereader.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf/dwarf2diehandler.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf/dwarf2reader.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf_cfi_to_module.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf_cu_to_module.cc
-		${BREAKPAD_SRC_DIR}/common/dwarf_line_to_module.cc
-		${BREAKPAD_SRC_DIR}/common/language.cc
+	set(DUMPSYMS_SRCS ${UNIX_DUMPSYMS_COMMON_SRC}
 		${BREAKPAD_SRC_DIR}/common/linux/dump_symbols.cc
 		${BREAKPAD_SRC_DIR}/common/linux/elf_symbols_to_module.cc
-		${BREAKPAD_SRC_DIR}/common/module.cc
-		${BREAKPAD_SRC_DIR}/common/stabs_reader.cc
-		${BREAKPAD_SRC_DIR}/common/stabs_to_module.cc
+    )
+
+    set(DUMPSYMS_SRCS
 		${BREAKPAD_SRC_DIR}/tools/linux/dump_syms/dump_syms.cc
 	)
 endif()
@@ -137,8 +140,11 @@ target_link_libraries(breakpad breakpad_common)
 
 # dump_syms - Tool for producing cross-platform .sym files
 # from a binary with debug info
+add_library(dumpsyms STATIC ${LIB_DUMPSYMS_SRCS})
+target_link_libraries(dumpsyms PUBLIC breakpad_common ${DUMPSYMS_LIBS})
+
 add_executable(dump_syms ${DUMPSYMS_SRCS})
-target_link_libraries(dump_syms breakpad_common ${DUMPSYMS_LIBS})
+target_link_libraries(dump_syms breakpad_common dumpsyms ${DUMPSYMS_LIBS})
 
 # minidump_stackwalk - A tool for producing a stacktrace
 # from a minidump using debug symbol files produced by dump_syms
@@ -167,33 +173,55 @@ if (UNIX)
   add_library(disasm ${LIBDISASM_SRCS})
 
   set(PROCESSOR_SRC_DIR ${BREAKPAD_SRC_DIR}/processor)
-  set(MINIDUMP_STACKWALK_SRCS
+  set(MINIDUMP_PROCESSOR_SRCS
     ${PROCESSOR_SRC_DIR}/basic_source_line_resolver.cc
     ${PROCESSOR_SRC_DIR}/basic_code_modules.cc
     ${PROCESSOR_SRC_DIR}/call_stack.cc
     ${PROCESSOR_SRC_DIR}/cfi_frame_info.cc
+    ${PROCESSOR_SRC_DIR}/convert_old_arm64_context.cc
     ${PROCESSOR_SRC_DIR}/disassembler_x86.cc
     ${PROCESSOR_SRC_DIR}/exploitability.cc
     ${PROCESSOR_SRC_DIR}/exploitability_win.cc
-    ${PROCESSOR_SRC_DIR}/external_symbol_supplier.cc
+    ${PROCESSOR_SRC_DIR}/exploitability_linux.cc
+    #${PROCESSOR_SRC_DIR}/external_symbol_supplier.cc
     ${PROCESSOR_SRC_DIR}/logging.cc
     ${PROCESSOR_SRC_DIR}/minidump.cc
     ${PROCESSOR_SRC_DIR}/minidump_processor.cc
     ${PROCESSOR_SRC_DIR}/minidump_stackwalk.cc
     ${PROCESSOR_SRC_DIR}/pathname_stripper.cc
     ${PROCESSOR_SRC_DIR}/process_state.cc
+    ${PROCESSOR_SRC_DIR}/proc_maps_linux.cc
     ${PROCESSOR_SRC_DIR}/simple_symbol_supplier.cc
     ${PROCESSOR_SRC_DIR}/stackwalker.cc
     ${PROCESSOR_SRC_DIR}/stackwalker_amd64.cc
     ${PROCESSOR_SRC_DIR}/stackwalker_arm.cc
+    ${PROCESSOR_SRC_DIR}/stackwalker_arm64.cc
     ${PROCESSOR_SRC_DIR}/stackwalker_ppc.cc
+    ${PROCESSOR_SRC_DIR}/stackwalker_ppc64.cc
     ${PROCESSOR_SRC_DIR}/stackwalker_sparc.cc
     ${PROCESSOR_SRC_DIR}/stackwalker_x86.cc
+    ${PROCESSOR_SRC_DIR}/stackwalker_mips.cc
     ${PROCESSOR_SRC_DIR}/source_line_resolver_base.cc
     ${PROCESSOR_SRC_DIR}/tokenize.cc
+    ${PROCESSOR_SRC_DIR}/dump_object.cc
+    ${PROCESSOR_SRC_DIR}/dump_context.cc
+    ${PROCESSOR_SRC_DIR}/stack_frame_symbolizer.cc
+    ${PROCESSOR_SRC_DIR}/stackwalk_common.cc
+    ${PROCESSOR_SRC_DIR}/symbolic_constants_win.cc
   )
-  add_executable(minidump_stackwalk ${MINIDUMP_STACKWALK_SRCS})
-  target_link_libraries(minidump_stackwalk disasm)
+    set(MINIDUMP_STACKWALK_SRCS
+        ${PROCESSOR_SRC_DIR}/minidump_stackwalk.cc
+    )
+    add_library(minidump_processor STATIC ${MINIDUMP_PROCESSOR_SRCS})
+    target_include_directories(
+        minidump_processor
+        PUBLIC
+            ${BREAKPAD_SRC_DIR}
+    )
+    target_link_libraries(minidump_processor PUBLIC disasm breakpad_common)
+
+    add_executable(minidump_stackwalk ${MINIDUMP_STACKWALK_SRCS})
+    target_link_libraries(minidump_stackwalk PRIVATE minidump_processor)
 endif()
 
 enable_testing()
@@ -209,3 +237,19 @@ set_target_properties(
 	PROPERTIES
 		FOLDER "Externals/breakpad"
 )
+
+
+foreach(tgt breakpad_client breakpad_common disasm dumpsyms dump_syms minidump_processor minidump_stackwalk)
+    if(TARGET ${tgt})
+        set_target_properties(${tgt} PROPERTIES AUTOMOC OFF)
+        target_compile_options(
+            ${tgt}
+            PRIVATE
+                -Wno-redeclared-class-member
+                -Wno-deprecated-declarations
+                -Wno-tautological-compare
+                -Wno-tautological-constant-out-of-range-compare
+        )
+    endif()
+endforeach()
+

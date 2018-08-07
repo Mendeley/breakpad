@@ -42,9 +42,9 @@
 
 #include "breakpad_googletest_includes.h"
 #include "common/module.h"
+#include "common/using_std_string.h"
 
 using google_breakpad::Module;
-using std::string;
 using std::stringstream;
 using std::vector;
 using testing::ContainerEq;
@@ -54,9 +54,7 @@ static Module::Function *generate_duplicate_function(const string &name) {
   const Module::Address DUP_SIZE = 0x200b26e605f99071LL;
   const Module::Address DUP_PARAMETER_SIZE = 0xf14ac4fed48c4a99LL;
 
-  Module::Function *function = new(Module::Function);
-  function->name = name;
-  function->address = DUP_ADDRESS;
+  Module::Function *function = new Module::Function(name, DUP_ADDRESS);
   function->size = DUP_SIZE;
   function->parameter_size = DUP_PARAMETER_SIZE;
   return function;
@@ -66,13 +64,24 @@ static Module::Function *generate_duplicate_function(const string &name) {
 #define MODULE_OS "os-name"
 #define MODULE_ARCH "architecture"
 #define MODULE_ID "id-string"
+#define MODULE_CODE_ID "code-id-string"
 
 TEST(Write, Header) {
   stringstream s;
   Module m(MODULE_NAME, MODULE_OS, MODULE_ARCH, MODULE_ID);
-  m.Write(s, true);
+  m.Write(s, ALL_SYMBOL_DATA);
   string contents = s.str();
   EXPECT_STREQ("MODULE os-name architecture id-string name with spaces\n",
+               contents.c_str());
+}
+
+TEST(Write, HeaderCodeId) {
+  stringstream s;
+  Module m(MODULE_NAME, MODULE_OS, MODULE_ARCH, MODULE_ID, MODULE_CODE_ID);
+  m.Write(s, ALL_SYMBOL_DATA);
+  string contents = s.str();
+  EXPECT_STREQ("MODULE os-name architecture id-string name with spaces\n"
+               "INFO CODE_ID code-id-string\n",
                contents.c_str());
 }
 
@@ -81,9 +90,8 @@ TEST(Write, OneLineFunc) {
   Module m(MODULE_NAME, MODULE_OS, MODULE_ARCH, MODULE_ID);
 
   Module::File *file = m.FindFile("file_name.cc");
-  Module::Function *function = new(Module::Function);
-  function->name = "function_name";
-  function->address = 0xe165bf8023b9d9abLL;
+  Module::Function *function = new Module::Function(
+      "function_name", 0xe165bf8023b9d9abLL);
   function->size = 0x1e4bb0eb1cbf5b09LL;
   function->parameter_size = 0x772beee89114358aLL;
   Module::Line line = { 0xe165bf8023b9d9abLL, 0x1e4bb0eb1cbf5b09LL,
@@ -91,7 +99,7 @@ TEST(Write, OneLineFunc) {
   function->lines.push_back(line);
   m.AddFunction(function);
 
-  m.Write(s, true);
+  m.Write(s, ALL_SYMBOL_DATA);
   string contents = s.str();
   EXPECT_STREQ("MODULE os-name architecture id-string name with spaces\n"
                "FILE 0 file_name.cc\n"
@@ -110,9 +118,8 @@ TEST(Write, RelativeLoadAddress) {
   Module::File *file2 = m.FindFile("filename-a.cc");
 
   // A function.
-  Module::Function *function = new(Module::Function);
-  function->name = "A_FLIBBERTIJIBBET::a_will_o_the_wisp(a clown)";
-  function->address = 0xbec774ea5dd935f3LL;
+  Module::Function *function = new Module::Function(
+      "A_FLIBBERTIJIBBET::a_will_o_the_wisp(a clown)", 0xbec774ea5dd935f3LL);
   function->size = 0x2922088f98d3f6fcLL;
   function->parameter_size = 0xe5e9aa008bd5f0d0LL;
 
@@ -141,7 +148,7 @@ TEST(Write, RelativeLoadAddress) {
   // the module must work fine.
   m.SetLoadAddress(0x2ab698b0b6407073LL);
 
-  m.Write(s, true);
+  m.Write(s, ALL_SYMBOL_DATA);
   string contents = s.str();
   EXPECT_STREQ("MODULE os-name architecture id-string name with spaces\n"
                "FILE 0 filename-a.cc\n"
@@ -168,9 +175,8 @@ TEST(Write, OmitUnusedFiles) {
   Module::File *file3 = m.FindFile("filename3");
 
   // Create a function.
-  Module::Function *function = new(Module::Function);
-  function->name = "function_name";
-  function->address = 0x9b926d464f0b9384LL;
+  Module::Function *function = new Module::Function(
+      "function_name", 0x9b926d464f0b9384LL);
   function->size = 0x4f524a4ba795e6a6LL;
   function->parameter_size = 0xbbe8133a6641c9b7LL;
 
@@ -197,7 +203,7 @@ TEST(Write, OmitUnusedFiles) {
   EXPECT_NE(-1, vec[2]->source_id);
 
   stringstream s;
-  m.Write(s, true);
+  m.Write(s, ALL_SYMBOL_DATA);
   string contents = s.str();
   EXPECT_STREQ("MODULE os-name architecture id-string name with spaces\n"
                "FILE 0 filename1\n"
@@ -217,9 +223,8 @@ TEST(Write, NoCFI) {
   Module::File *file1 = m.FindFile("filename.cc");
 
   // A function.
-  Module::Function *function = new(Module::Function);
-  function->name = "A_FLIBBERTIJIBBET::a_will_o_the_wisp(a clown)";
-  function->address = 0xbec774ea5dd935f3LL;
+  Module::Function *function = new Module::Function(
+      "A_FLIBBERTIJIBBET::a_will_o_the_wisp(a clown)", 0xbec774ea5dd935f3LL);
   function->size = 0x2922088f98d3f6fcLL;
   function->parameter_size = 0xe5e9aa008bd5f0d0LL;
 
@@ -245,7 +250,7 @@ TEST(Write, NoCFI) {
   // the module must work fine.
   m.SetLoadAddress(0x2ab698b0b6407073LL);
 
-  m.Write(s, false);
+  m.Write(s, NO_CFI);
   string contents = s.str();
   EXPECT_STREQ("MODULE os-name architecture id-string name with spaces\n"
                "FILE 0 filename.cc\n"
@@ -260,15 +265,13 @@ TEST(Construct, AddFunctions) {
   Module m(MODULE_NAME, MODULE_OS, MODULE_ARCH, MODULE_ID);
 
   // Two functions.
-  Module::Function *function1 = new(Module::Function);
-  function1->name = "_without_form";
-  function1->address = 0xd35024aa7ca7da5cLL;
+  Module::Function *function1 = new Module::Function(
+      "_without_form", 0xd35024aa7ca7da5cLL);
   function1->size = 0x200b26e605f99071LL;
   function1->parameter_size = 0xf14ac4fed48c4a99LL;
 
-  Module::Function *function2 = new(Module::Function);
-  function2->name = "_and_void";
-  function2->address = 0x2987743d0b35b13fLL;
+  Module::Function *function2 = new Module::Function(
+      "_and_void", 0x2987743d0b35b13fLL);
   function2->size = 0xb369db048deb3010LL;
   function2->parameter_size = 0x938e556cb5a79988LL;
 
@@ -279,7 +282,7 @@ TEST(Construct, AddFunctions) {
 
   m.AddFunctions(vec.begin(), vec.end());
 
-  m.Write(s, true);
+  m.Write(s, ALL_SYMBOL_DATA);
   string contents = s.str();
   EXPECT_STREQ("MODULE os-name architecture id-string name with spaces\n"
                "FUNC 2987743d0b35b13f b369db048deb3010 938e556cb5a79988"
@@ -331,7 +334,7 @@ TEST(Construct, AddFrames) {
   m.AddStackFrameEntry(entry3);
 
   // Check that Write writes STACK CFI records properly.
-  m.Write(s, true);
+  m.Write(s, ALL_SYMBOL_DATA);
   string contents = s.str();
   EXPECT_STREQ("MODULE os-name architecture id-string name with spaces\n"
                "STACK CFI INIT ddb5f41285aa7757 1486493370dc5073 \n"
@@ -407,7 +410,7 @@ TEST(Construct, DuplicateFunctions) {
   m.AddFunction(function1);
   m.AddFunction(function2);
 
-  m.Write(s, true);
+  m.Write(s, ALL_SYMBOL_DATA);
   string contents = s.str();
   EXPECT_STREQ("MODULE os-name architecture id-string name with spaces\n"
                "FUNC d35402aac7a7ad5c 200b26e605f99071 f14ac4fed48c4a99"
@@ -426,7 +429,7 @@ TEST(Construct, FunctionsWithSameAddress) {
   m.AddFunction(function1);
   m.AddFunction(function2);
 
-  m.Write(s, true);
+  m.Write(s, ALL_SYMBOL_DATA);
   string contents = s.str();
   EXPECT_STREQ("MODULE os-name architecture id-string name with spaces\n"
                "FUNC d35402aac7a7ad5c 200b26e605f99071 f14ac4fed48c4a99"
@@ -443,17 +446,15 @@ TEST(Construct, Externs) {
   Module m(MODULE_NAME, MODULE_OS, MODULE_ARCH, MODULE_ID);
 
   // Two externs.
-  Module::Extern *extern1 = new(Module::Extern);
-  extern1->address = 0xffff;
+  Module::Extern *extern1 = new Module::Extern(0xffff);
   extern1->name = "_abc";
-  Module::Extern *extern2 = new(Module::Extern);
-  extern2->address = 0xaaaa;
+  Module::Extern *extern2 = new Module::Extern(0xaaaa);
   extern2->name = "_xyz";
 
   m.AddExtern(extern1);
   m.AddExtern(extern2);
 
-  m.Write(s, true);
+  m.Write(s, ALL_SYMBOL_DATA);
   string contents = s.str();
 
   EXPECT_STREQ("MODULE " MODULE_OS " " MODULE_ARCH " "
@@ -470,21 +471,87 @@ TEST(Construct, DuplicateExterns) {
   Module m(MODULE_NAME, MODULE_OS, MODULE_ARCH, MODULE_ID);
 
   // Two externs.
-  Module::Extern *extern1 = new(Module::Extern);
-  extern1->address = 0xffff;
+  Module::Extern *extern1 = new Module::Extern(0xffff);
   extern1->name = "_xyz";
-  Module::Extern *extern2 = new(Module::Extern);
-  extern2->address = 0xffff;
+  Module::Extern *extern2 = new Module::Extern(0xffff);
   extern2->name = "_abc";
 
   m.AddExtern(extern1);
   m.AddExtern(extern2);
 
-  m.Write(s, true);
+  m.Write(s, ALL_SYMBOL_DATA);
   string contents = s.str();
 
   EXPECT_STREQ("MODULE " MODULE_OS " " MODULE_ARCH " "
                MODULE_ID " " MODULE_NAME "\n"
                "PUBLIC ffff 0 _xyz\n",
+               contents.c_str());
+}
+
+// If there exists an extern and a function at the same address, only write
+// out the FUNC entry.
+TEST(Construct, FunctionsAndExternsWithSameAddress) {
+  stringstream s;
+  Module m(MODULE_NAME, MODULE_OS, MODULE_ARCH, MODULE_ID);
+
+  // Two externs.
+  Module::Extern* extern1 = new Module::Extern(0xabc0);
+  extern1->name = "abc";
+  Module::Extern* extern2 = new Module::Extern(0xfff0);
+  extern2->name = "xyz";
+
+  m.AddExtern(extern1);
+  m.AddExtern(extern2);
+
+  Module::Function* function = new Module::Function("_xyz", 0xfff0);
+  function->size = 0x10;
+  function->parameter_size = 0;
+  m.AddFunction(function);
+
+  m.Write(s, ALL_SYMBOL_DATA);
+  string contents = s.str();
+
+  EXPECT_STREQ("MODULE " MODULE_OS " " MODULE_ARCH " "
+               MODULE_ID " " MODULE_NAME "\n"
+               "FUNC fff0 10 0 _xyz\n"
+               "PUBLIC abc0 0 abc\n",
+               contents.c_str());
+}
+
+// If there exists an extern and a function at the same address, only write
+// out the FUNC entry. For ARM THUMB, the extern that comes from the ELF
+// symbol section has bit 0 set.
+TEST(Construct, FunctionsAndThumbExternsWithSameAddress) {
+  stringstream s;
+  Module m(MODULE_NAME, MODULE_OS, "arm", MODULE_ID);
+
+  // Two THUMB externs.
+  Module::Extern* thumb_extern1 = new Module::Extern(0xabc1);
+  thumb_extern1->name = "thumb_abc";
+  Module::Extern* thumb_extern2 = new Module::Extern(0xfff1);
+  thumb_extern2->name = "thumb_xyz";
+
+  Module::Extern* arm_extern1 = new Module::Extern(0xcc00);
+  arm_extern1->name = "arm_func";
+
+  m.AddExtern(thumb_extern1);
+  m.AddExtern(thumb_extern2);
+  m.AddExtern(arm_extern1);
+
+  // The corresponding function from the DWARF debug data have the actual
+  // address.
+  Module::Function* function = new Module::Function("_thumb_xyz", 0xfff0);
+  function->size = 0x10;
+  function->parameter_size = 0;
+  m.AddFunction(function);
+
+  m.Write(s, ALL_SYMBOL_DATA);
+  string contents = s.str();
+
+  EXPECT_STREQ("MODULE " MODULE_OS " arm "
+               MODULE_ID " " MODULE_NAME "\n"
+               "FUNC fff0 10 0 _thumb_xyz\n"
+               "PUBLIC abc1 0 thumb_abc\n"
+               "PUBLIC cc00 0 arm_func\n",
                contents.c_str());
 }

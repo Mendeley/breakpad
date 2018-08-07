@@ -41,10 +41,7 @@ Section::Section(const Dump &dump)
   : test_assembler::Section(dump.endianness()) { }
 
 void Section::CiteLocationIn(test_assembler::Section *section) const {
-  if (this)
-    (*section).D32(size_).D32(file_offset_);
-  else
-    (*section).D32(0).D32(0);
+  (*section).D32(size_).D32(file_offset_);
 }
 
 void Stream::CiteStreamIn(test_assembler::Section *section) const {
@@ -77,6 +74,9 @@ SystemInfo::SystemInfo(const Dump &dump,
     D32(system_info.cpu.x86_cpu_info.version_information);
     D32(system_info.cpu.x86_cpu_info.feature_information);
     D32(system_info.cpu.x86_cpu_info.amd_extended_cpu_features);
+  } else if (system_info.processor_architecture == MD_CPU_ARCHITECTURE_ARM) {
+    D32(system_info.cpu.arm_cpu_info.cpuid);
+    D32(system_info.cpu.arm_cpu_info.elf_hwcaps);
   } else {
     D64(system_info.cpu.other_cpu_info.processor_features[0]);
     D64(system_info.cpu.other_cpu_info.processor_features[1]);
@@ -126,7 +126,10 @@ void Memory::CiteMemoryIn(test_assembler::Section *section) const {
 Context::Context(const Dump &dump, const MDRawContextX86 &context)
   : Section(dump) {
   // The caller should have properly set the CPU type flag.
-  assert(context.context_flags & MD_CONTEXT_X86);
+  // The high 24 bits identify the CPU.  Note that context records with no CPU
+  // type information can be valid (e.g. produced by ::RtlCaptureContext).
+  assert(((context.context_flags & MD_CONTEXT_CPU_MASK) == 0) ||
+         (context.context_flags & MD_CONTEXT_X86));
   // It doesn't make sense to store x86 registers in big-endian form.
   assert(dump.endianness() == kLittleEndian);
   D32(context.context_flags);
@@ -189,10 +192,46 @@ Context::Context(const Dump &dump, const MDRawContextARM &context)
   assert(Size() == sizeof(MDRawContextARM));
 }
 
+Context::Context(const Dump &dump, const MDRawContextMIPS &context)
+    : Section(dump) {
+  // The caller should have properly set the CPU type flag.
+  assert(context.context_flags & MD_CONTEXT_MIPS);
+  D32(context.context_flags);
+  D32(context._pad0);
+
+  for (int i = 0; i < MD_CONTEXT_MIPS_GPR_COUNT; ++i)
+    D64(context.iregs[i]);
+
+  D64(context.mdhi);
+  D64(context.mdlo);
+
+  for (int i = 0; i < MD_CONTEXT_MIPS_DSP_COUNT; ++i)
+    D32(context.hi[i]);
+
+  for (int i = 0; i < MD_CONTEXT_MIPS_DSP_COUNT; ++i)
+    D32(context.lo[i]);
+
+  D32(context.dsp_control);
+  D32(context._pad1);
+
+  D64(context.epc);
+  D64(context.badvaddr);
+  D32(context.status);
+  D32(context.cause);
+
+  for (int i = 0; i < MD_FLOATINGSAVEAREA_MIPS_FPR_COUNT; ++i)
+    D64(context.float_save.regs[i]);
+
+  D32(context.float_save.fpcsr);
+  D32(context.float_save.fir);
+
+  assert(Size() == sizeof(MDRawContextMIPS));
+}
+
 Thread::Thread(const Dump &dump,
-               u_int32_t thread_id, const Memory &stack, const Context &context,
-               u_int32_t suspend_count, u_int32_t priority_class,
-               u_int32_t priority, u_int64_t teb) : Section(dump) {
+               uint32_t thread_id, const Memory &stack, const Context &context,
+               uint32_t suspend_count, uint32_t priority_class,
+               uint32_t priority, uint64_t teb) : Section(dump) {
   D32(thread_id);
   D32(suspend_count);
   D32(priority_class);
@@ -204,11 +243,11 @@ Thread::Thread(const Dump &dump,
 }
 
 Module::Module(const Dump &dump,
-               u_int64_t base_of_image,
-               u_int32_t size_of_image,
+               uint64_t base_of_image,
+               uint32_t size_of_image,
                const String &name,
-               u_int32_t time_date_stamp,
-               u_int32_t checksum,
+               uint32_t time_date_stamp,
+               uint32_t checksum,
                const MDVSFixedFileInfo &version_info,
                const Section *cv_record,
                const Section *misc_record) : Section(dump) {
@@ -230,8 +269,14 @@ Module::Module(const Dump &dump,
   D32(version_info.file_subtype);
   D32(version_info.file_date_hi);
   D32(version_info.file_date_lo);
-  cv_record->CiteLocationIn(this);
-  misc_record->CiteLocationIn(this);
+  if (cv_record)
+    cv_record->CiteLocationIn(this);
+  else
+    D32(0).D32(0);
+  if (misc_record)
+    misc_record->CiteLocationIn(this);
+  else
+    D32(0).D32(0);
   D64(0).D64(0);
 }
 
@@ -252,12 +297,32 @@ const MDVSFixedFileInfo Module::stock_version_info = {
   0                                     // file_date_lo
 };
 
+UnloadedModule::UnloadedModule(const Dump &dump,
+                               uint64_t base_of_image,
+                               uint32_t size_of_image,
+                               const String &name,
+                               uint32_t checksum,
+                               uint32_t time_date_stamp) : Section(dump) {
+  D64(base_of_image);
+  D32(size_of_image);
+  D32(checksum);
+  D32(time_date_stamp);
+  name.CiteStringIn(this);
+}
+
+UnloadedModuleList::UnloadedModuleList(const Dump &dump, uint32_t type)
+  : List<UnloadedModule>(dump, type, false) {
+  D32(sizeof(MDRawUnloadedModuleList));
+  D32(sizeof(MDRawUnloadedModule));
+  D32(count_label_);
+}
+
 Exception::Exception(const Dump &dump,
                      const Context &context,
-                     u_int32_t thread_id,
-                     u_int32_t exception_code,
-                     u_int32_t exception_flags,
-                     u_int64_t exception_address)
+                     uint32_t thread_id,
+                     uint32_t exception_code,
+                     uint32_t exception_flags,
+                     uint64_t exception_address)
   : Stream(dump, MD_EXCEPTION_STREAM) {
   D32(thread_id);
   D32(0);  // __align
@@ -273,16 +338,17 @@ Exception::Exception(const Dump &dump,
   assert(Size() == sizeof(MDRawExceptionStream));
 }
 
-Dump::Dump(u_int64_t flags,
+Dump::Dump(uint64_t flags,
            Endianness endianness,
-           u_int32_t version,
-           u_int32_t date_time_stamp)
+           uint32_t version,
+           uint32_t date_time_stamp)
     : test_assembler::Section(endianness),
       file_start_(0),
       stream_directory_(*this),
       stream_count_(0),
       thread_list_(*this, MD_THREAD_LIST_STREAM),
       module_list_(*this, MD_MODULE_LIST_STREAM),
+      unloaded_module_list_(*this, MD_UNLOADED_MODULE_LIST_STREAM),
       memory_list_(*this, MD_MEMORY_LIST_STREAM)
  {
   D32(MD_HEADER_SIGNATURE);
@@ -330,9 +396,15 @@ Dump &Dump::Add(Module *module) {
   return *this;
 }
 
+Dump &Dump::Add(UnloadedModule *unloaded_module) {
+  unloaded_module_list_.Add(unloaded_module);
+  return *this;
+}
+
 void Dump::Finish() {
   if (!thread_list_.Empty()) Add(&thread_list_);
   if (!module_list_.Empty()) Add(&module_list_);
+  if (!unloaded_module_list_.Empty()) Add(&unloaded_module_list_);
   if (!memory_list_.Empty()) Add(&memory_list_);
 
   // Create the stream directory. We don't use

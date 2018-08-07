@@ -1,5 +1,4 @@
-# Copyright (c) 2010, Google Inc.
-# All rights reserved.
+# Copyright 2010 Google Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -27,18 +26,59 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-# We only use this file to ease the steps of generating projects after
-# syncing, if we use gclient. All dependencies are svn:externals instead.
-# If you're not using gclient, you need to run the gyp python script to
-# generate the projects.
-# This can be done by the following command (assuming current directory):
-#   src\tools\gyp\gyp.bat src\client\windows\breakpad_client.gyp
+# This is used to mimic the svn:externals mechanism for gclient (both Git and
+# SVN) based checkouts of Breakpad. As such, its use is entirely optional. If
+# using a manually managed SVN checkout as opposed to a gclient managed checkout
+# you can still use the hooks mechanism for generating project files by calling
+# 'gclient runhooks' rather than 'gclient sync'.
+
+deps = {
+  # Testing libraries and utilities.
+  "src/src/testing":
+    "https://github.com/google/googletest.git" +
+      "@release-1.8.0",
+
+  # Protobuf.
+  "src/src/third_party/protobuf/protobuf":
+    "https://github.com/google/protobuf.git" +
+      "@cb6dd4ef5f82e41e06179dcd57d3b1d9246ad6ac",
+
+  # GYP project generator.
+  "src/src/tools/gyp":
+    "https://chromium.googlesource.com/external/gyp/" +
+      "@324dd166b7c0b39d513026fa52d6280ac6d56770",
+
+  # Linux syscall support.
+  "src/src/third_party/lss":
+    "https://chromium.googlesource.com/linux-syscall-support/" +
+      "@a89bf7903f3169e6bc7b8efc10a73a7571de21cf",
+}
+
 hooks = [
   {
-    # A change to a .gyp, .gypi, or to GYP itself should run the generator.
-    "pattern": ".",
-    "action": ["python",
-               "src/src/tools/gyp/gyp",
-               "src/src/client/windows/breakpad_client.gyp"],
+    # Keep the manifest up to date.
+    "action": ["python", "src/src/tools/python/deps-to-manifest.py",
+               "src/DEPS", "src/default.xml"],
   },
 ]
+
+hooks_os = {
+  'win': [
+    {
+      # TODO(chrisha): Fix the GYP files so that they work without
+      # --no-circular-check.
+      "pattern": ".",
+      "action": ["python",
+                 "src/src/tools/gyp/gyp_main.py",
+                 "--no-circular-check",
+                 "src/src/client/windows/breakpad_client.gyp"],
+    },
+    {
+      # XXX: this and above should all be wired into build/all.gyp ?
+      "action": ["python",
+                 "src/src/tools/gyp/gyp_main.py",
+                 "--no-circular-check",
+                 "src/src/tools/windows/tools_windows.gyp"],
+    },
+  ],
+}

@@ -37,12 +37,14 @@
 //
 // Author: Siyang Xie (lambxsy@google.com)
 
+#include <assert.h>
 #include <stdio.h>
 
 #include <sstream>
 #include <string>
 
 #include "breakpad_googletest_includes.h"
+#include "common/using_std_string.h"
 #include "google_breakpad/processor/code_module.h"
 #include "google_breakpad/processor/stack_frame.h"
 #include "google_breakpad/processor/memory_region.h"
@@ -52,7 +54,6 @@
 
 namespace {
 
-using std::string;
 using google_breakpad::SourceLineResolverBase;
 using google_breakpad::BasicSourceLineResolver;
 using google_breakpad::FastSourceLineResolver;
@@ -71,16 +72,19 @@ class TestCodeModule : public CodeModule {
   explicit TestCodeModule(string code_file) : code_file_(code_file) {}
   virtual ~TestCodeModule() {}
 
-  virtual u_int64_t base_address() const { return 0; }
-  virtual u_int64_t size() const { return 0xb000; }
+  virtual uint64_t base_address() const { return 0; }
+  virtual uint64_t size() const { return 0xb000; }
   virtual string code_file() const { return code_file_; }
   virtual string code_identifier() const { return ""; }
   virtual string debug_file() const { return ""; }
   virtual string debug_identifier() const { return ""; }
   virtual string version() const { return ""; }
-  virtual const CodeModule* Copy() const {
+  virtual CodeModule* Copy() const {
     return new TestCodeModule(code_file_);
   }
+  virtual bool is_unloaded() const { return false; }
+  virtual uint64_t shrink_down_delta() const { return 0; }
+  virtual void SetShrinkDownDelta(uint64_t shrink_down_delta) {}
 
  private:
   string code_file_;
@@ -88,17 +92,17 @@ class TestCodeModule : public CodeModule {
 
 // A mock memory region object, for use by the STACK CFI tests.
 class MockMemoryRegion: public MemoryRegion {
-  u_int64_t GetBase() const { return 0x10000; }
-  u_int32_t GetSize() const { return 0x01000; }
-  bool GetMemoryAtAddress(u_int64_t address, u_int8_t *value) const {
+  uint64_t GetBase() const { return 0x10000; }
+  uint32_t GetSize() const { return 0x01000; }
+  bool GetMemoryAtAddress(uint64_t address, uint8_t *value) const {
     *value = address & 0xff;
     return true;
   }
-  bool GetMemoryAtAddress(u_int64_t address, u_int16_t *value) const {
+  bool GetMemoryAtAddress(uint64_t address, uint16_t *value) const {
     *value = address & 0xffff;
     return true;
   }
-  bool GetMemoryAtAddress(u_int64_t address, u_int32_t *value) const {
+  bool GetMemoryAtAddress(uint64_t address, uint32_t *value) const {
     switch (address) {
       case 0x10008: *value = 0x98ecadc3; break;  // saved %ebx
       case 0x1000c: *value = 0x878f7524; break;  // saved %esi
@@ -109,9 +113,12 @@ class MockMemoryRegion: public MemoryRegion {
     }
     return true;
   }
-  bool GetMemoryAtAddress(u_int64_t address, u_int64_t *value) const {
+  bool GetMemoryAtAddress(uint64_t address, uint64_t *value) const {
     *value = address;
     return true;
+  }
+  void Print() const {
+    assert(false);
   }
 };
 
@@ -121,9 +128,9 @@ class MockMemoryRegion: public MemoryRegion {
 // ".cfa".
 static bool VerifyRegisters(
     const char *file, int line,
-    const CFIFrameInfo::RegisterValueMap<u_int32_t> &expected,
-    const CFIFrameInfo::RegisterValueMap<u_int32_t> &actual) {
-  CFIFrameInfo::RegisterValueMap<u_int32_t>::const_iterator a;
+    const CFIFrameInfo::RegisterValueMap<uint32_t> &expected,
+    const CFIFrameInfo::RegisterValueMap<uint32_t> &actual) {
+  CFIFrameInfo::RegisterValueMap<uint32_t>::const_iterator a;
   a = actual.find(".cfa");
   if (a == actual.end())
     return false;
@@ -131,7 +138,7 @@ static bool VerifyRegisters(
   if (a == actual.end())
     return false;
   for (a = actual.begin(); a != actual.end(); a++) {
-    CFIFrameInfo::RegisterValueMap<u_int32_t>::const_iterator e =
+    CFIFrameInfo::RegisterValueMap<uint32_t>::const_iterator e =
       expected.find(a->first);
     if (e == expected.end()) {
       fprintf(stderr, "%s:%d: unexpected register '%s' recovered, value 0x%x\n",
@@ -213,20 +220,20 @@ TEST_F(TestFastSourceLineResolver, TestLoadAndResolve) {
   fast_resolver.FillSourceLineInfo(&frame);
   ASSERT_FALSE(frame.module);
   ASSERT_TRUE(frame.function_name.empty());
-  ASSERT_EQ(frame.function_base, 0);
+  ASSERT_EQ(frame.function_base, 0U);
   ASSERT_TRUE(frame.source_file_name.empty());
   ASSERT_EQ(frame.source_line, 0);
-  ASSERT_EQ(frame.source_line_base, 0);
+  ASSERT_EQ(frame.source_line_base, 0U);
 
   frame.module = &module1;
   fast_resolver.FillSourceLineInfo(&frame);
   ASSERT_EQ(frame.function_name, "Function1_1");
   ASSERT_TRUE(frame.module);
   ASSERT_EQ(frame.module->code_file(), "module1");
-  ASSERT_EQ(frame.function_base, 0x1000);
+  ASSERT_EQ(frame.function_base, 0x1000U);
   ASSERT_EQ(frame.source_file_name, "file1_1.cc");
   ASSERT_EQ(frame.source_line, 44);
-  ASSERT_EQ(frame.source_line_base, 0x1000);
+  ASSERT_EQ(frame.source_line_base, 0x1000U);
   windows_frame_info.reset(fast_resolver.FindWindowsFrameInfo(&frame));
   ASSERT_TRUE(windows_frame_info.get());
   ASSERT_FALSE(windows_frame_info->allocates_base_pointer);
@@ -248,6 +255,7 @@ TEST_F(TestFastSourceLineResolver, TestLoadAndResolve) {
   ASSERT_EQ(frame.source_line, 0);
   windows_frame_info.reset(fast_resolver.FindWindowsFrameInfo(&frame));
   ASSERT_TRUE(windows_frame_info.get());
+  ASSERT_EQ(windows_frame_info->type_, WindowsFrameInfo::STACK_INFO_UNKNOWN);
   ASSERT_FALSE(windows_frame_info->allocates_base_pointer);
   ASSERT_TRUE(windows_frame_info->program_string.empty());
 
@@ -258,6 +266,7 @@ TEST_F(TestFastSourceLineResolver, TestLoadAndResolve) {
   ASSERT_EQ(frame.source_line, 0);
   windows_frame_info.reset(fast_resolver.FindWindowsFrameInfo(&frame));
   ASSERT_TRUE(windows_frame_info.get());
+  ASSERT_EQ(windows_frame_info->type_, WindowsFrameInfo::STACK_INFO_FRAME_DATA);
   ASSERT_FALSE(windows_frame_info->allocates_base_pointer);
   ASSERT_FALSE(windows_frame_info->program_string.empty());
 
@@ -278,9 +287,9 @@ TEST_F(TestFastSourceLineResolver, TestLoadAndResolve) {
   cfi_frame_info.reset(fast_resolver.FindCFIFrameInfo(&frame));
   ASSERT_FALSE(cfi_frame_info.get());
 
-  CFIFrameInfo::RegisterValueMap<u_int32_t> current_registers;
-  CFIFrameInfo::RegisterValueMap<u_int32_t> caller_registers;
-  CFIFrameInfo::RegisterValueMap<u_int32_t> expected_caller_registers;
+  CFIFrameInfo::RegisterValueMap<uint32_t> current_registers;
+  CFIFrameInfo::RegisterValueMap<uint32_t> caller_registers;
+  CFIFrameInfo::RegisterValueMap<uint32_t> expected_caller_registers;
   MockMemoryRegion memory;
 
   // Regardless of which instruction evaluation takes place at, it
@@ -303,7 +312,7 @@ TEST_F(TestFastSourceLineResolver, TestLoadAndResolve) {
   cfi_frame_info.reset(fast_resolver.FindCFIFrameInfo(&frame));
   ASSERT_TRUE(cfi_frame_info.get());
   ASSERT_TRUE(cfi_frame_info.get()
-              ->FindCallerRegs<u_int32_t>(current_registers, memory,
+              ->FindCallerRegs<uint32_t>(current_registers, memory,
                                           &caller_registers));
   ASSERT_TRUE(VerifyRegisters(__FILE__, __LINE__,
                               expected_caller_registers, caller_registers));
@@ -313,7 +322,7 @@ TEST_F(TestFastSourceLineResolver, TestLoadAndResolve) {
   cfi_frame_info.reset(fast_resolver.FindCFIFrameInfo(&frame));
   ASSERT_TRUE(cfi_frame_info.get());
   ASSERT_TRUE(cfi_frame_info.get()
-              ->FindCallerRegs<u_int32_t>(current_registers, memory,
+              ->FindCallerRegs<uint32_t>(current_registers, memory,
                                           &caller_registers));
   ASSERT_TRUE(VerifyRegisters(__FILE__, __LINE__,
                               expected_caller_registers, caller_registers));
@@ -323,7 +332,7 @@ TEST_F(TestFastSourceLineResolver, TestLoadAndResolve) {
   cfi_frame_info.reset(fast_resolver.FindCFIFrameInfo(&frame));
   ASSERT_TRUE(cfi_frame_info.get());
   ASSERT_TRUE(cfi_frame_info.get()
-              ->FindCallerRegs<u_int32_t>(current_registers, memory,
+              ->FindCallerRegs<uint32_t>(current_registers, memory,
                                           &caller_registers));
   VerifyRegisters(__FILE__, __LINE__,
                   expected_caller_registers, caller_registers);
@@ -333,7 +342,7 @@ TEST_F(TestFastSourceLineResolver, TestLoadAndResolve) {
   cfi_frame_info.reset(fast_resolver.FindCFIFrameInfo(&frame));
   ASSERT_TRUE(cfi_frame_info.get());
   ASSERT_TRUE(cfi_frame_info.get()
-              ->FindCallerRegs<u_int32_t>(current_registers, memory,
+              ->FindCallerRegs<uint32_t>(current_registers, memory,
                                           &caller_registers));
   VerifyRegisters(__FILE__, __LINE__,
                   expected_caller_registers, caller_registers);
@@ -343,7 +352,7 @@ TEST_F(TestFastSourceLineResolver, TestLoadAndResolve) {
   cfi_frame_info.reset(fast_resolver.FindCFIFrameInfo(&frame));
   ASSERT_TRUE(cfi_frame_info.get());
   ASSERT_TRUE(cfi_frame_info.get()
-              ->FindCallerRegs<u_int32_t>(current_registers, memory,
+              ->FindCallerRegs<uint32_t>(current_registers, memory,
                                           &caller_registers));
   VerifyRegisters(__FILE__, __LINE__,
                   expected_caller_registers, caller_registers);
@@ -353,7 +362,7 @@ TEST_F(TestFastSourceLineResolver, TestLoadAndResolve) {
   cfi_frame_info.reset(fast_resolver.FindCFIFrameInfo(&frame));
   ASSERT_TRUE(cfi_frame_info.get());
   ASSERT_TRUE(cfi_frame_info.get()
-              ->FindCallerRegs<u_int32_t>(current_registers, memory,
+              ->FindCallerRegs<uint32_t>(current_registers, memory,
                                           &caller_registers));
   VerifyRegisters(__FILE__, __LINE__,
                   expected_caller_registers, caller_registers);
@@ -372,15 +381,16 @@ TEST_F(TestFastSourceLineResolver, TestLoadAndResolve) {
   frame.module = &module2;
   fast_resolver.FillSourceLineInfo(&frame);
   ASSERT_EQ(frame.function_name, "Function2_2");
-  ASSERT_EQ(frame.function_base, 0x2170);
+  ASSERT_EQ(frame.function_base, 0x2170U);
   ASSERT_TRUE(frame.module);
   ASSERT_EQ(frame.module->code_file(), "module2");
   ASSERT_EQ(frame.source_file_name, "file2_2.cc");
   ASSERT_EQ(frame.source_line, 21);
-  ASSERT_EQ(frame.source_line_base, 0x2180);
+  ASSERT_EQ(frame.source_line_base, 0x2180U);
   windows_frame_info.reset(fast_resolver.FindWindowsFrameInfo(&frame));
   ASSERT_TRUE(windows_frame_info.get());
-  ASSERT_EQ(windows_frame_info->prolog_size, 1);
+  ASSERT_EQ(windows_frame_info->type_, WindowsFrameInfo::STACK_INFO_FRAME_DATA);
+  ASSERT_EQ(windows_frame_info->prolog_size, 1U);
 
   frame.instruction = 0x216f;
   fast_resolver.FillSourceLineInfo(&frame);
@@ -400,28 +410,32 @@ TEST_F(TestFastSourceLineResolver, TestLoadAndResolve) {
 
 TEST_F(TestFastSourceLineResolver, TestInvalidLoads) {
   TestCodeModule module3("module3");
-  ASSERT_FALSE(basic_resolver.LoadModule(&module3,
-                                         testdata_dir + "/module3_bad.out"));
-  ASSERT_FALSE(basic_resolver.HasModule(&module3));
+  ASSERT_TRUE(basic_resolver.LoadModule(&module3,
+                                        testdata_dir + "/module3_bad.out"));
+  ASSERT_TRUE(basic_resolver.HasModule(&module3));
+  ASSERT_TRUE(basic_resolver.IsModuleCorrupt(&module3));
   // Convert module3 to fast_module:
-  ASSERT_FALSE(serializer.ConvertOneModule(module3.code_file(),
-                                           &basic_resolver,
-                                           &fast_resolver));
-  ASSERT_FALSE(fast_resolver.HasModule(&module3));
+  ASSERT_TRUE(serializer.ConvertOneModule(module3.code_file(),
+                                          &basic_resolver,
+                                          &fast_resolver));
+  ASSERT_TRUE(fast_resolver.HasModule(&module3));
+  ASSERT_TRUE(fast_resolver.IsModuleCorrupt(&module3));
 
   TestCodeModule module4("module4");
-  ASSERT_FALSE(basic_resolver.LoadModule(&module4,
-                                         testdata_dir + "/module4_bad.out"));
-  ASSERT_FALSE(basic_resolver.HasModule(&module4));
+  ASSERT_TRUE(basic_resolver.LoadModule(&module4,
+                                        testdata_dir + "/module4_bad.out"));
+  ASSERT_TRUE(basic_resolver.HasModule(&module4));
+  ASSERT_TRUE(basic_resolver.IsModuleCorrupt(&module4));
   // Convert module4 to fast_module:
-  ASSERT_FALSE(serializer.ConvertOneModule(module4.code_file(),
-                                           &basic_resolver,
-                                           &fast_resolver));
-  ASSERT_FALSE(fast_resolver.HasModule(&module4));
+  ASSERT_TRUE(serializer.ConvertOneModule(module4.code_file(),
+                                          &basic_resolver,
+                                          &fast_resolver));
+  ASSERT_TRUE(fast_resolver.HasModule(&module4));
+  ASSERT_TRUE(fast_resolver.IsModuleCorrupt(&module4));
 
   TestCodeModule module5("module5");
   ASSERT_FALSE(fast_resolver.LoadModule(&module5,
-                                         testdata_dir + "/invalid-filename"));
+                                        testdata_dir + "/invalid-filename"));
   ASSERT_FALSE(fast_resolver.HasModule(&module5));
 
   TestCodeModule invalidmodule("invalid-module");
@@ -454,6 +468,7 @@ TEST_F(TestFastSourceLineResolver, TestUnload) {
 
 TEST_F(TestFastSourceLineResolver, CompareModule) {
   char *symbol_data;
+  size_t symbol_data_size;
   string symbol_data_string;
   string filename;
 
@@ -462,8 +477,8 @@ TEST_F(TestFastSourceLineResolver, CompareModule) {
     ss << testdata_dir << "/module" << module_index << ".out";
     filename = ss.str();
     ASSERT_TRUE(SourceLineResolverBase::ReadSymbolFile(
-        &symbol_data, symbol_file(module_index)));
-    symbol_data_string = symbol_data;
+        symbol_file(module_index), &symbol_data, &symbol_data_size));
+    symbol_data_string.assign(symbol_data, symbol_data_size);
     delete [] symbol_data;
     ASSERT_TRUE(module_comparer.Compare(symbol_data_string));
   }

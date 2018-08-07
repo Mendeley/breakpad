@@ -36,7 +36,9 @@
 #include <stdlib.h>
 #include <string>
 #include <vector>
+
 #include "breakpad_googletest_includes.h"
+#include "common/using_std_string.h"
 #include "google_breakpad/common/minidump_format.h"
 #include "google_breakpad/processor/minidump.h"
 #include "processor/logging.h"
@@ -54,6 +56,8 @@ using google_breakpad::MinidumpMemoryRegion;
 using google_breakpad::MinidumpModule;
 using google_breakpad::MinidumpModuleList;
 using google_breakpad::MinidumpSystemInfo;
+using google_breakpad::MinidumpUnloadedModule;
+using google_breakpad::MinidumpUnloadedModuleList;
 using google_breakpad::MinidumpThread;
 using google_breakpad::MinidumpThreadList;
 using google_breakpad::SynthMinidump::Context;
@@ -61,6 +65,8 @@ using google_breakpad::SynthMinidump::Dump;
 using google_breakpad::SynthMinidump::Exception;
 using google_breakpad::SynthMinidump::Memory;
 using google_breakpad::SynthMinidump::Module;
+using google_breakpad::SynthMinidump::UnloadedModule;
+using google_breakpad::SynthMinidump::Section;
 using google_breakpad::SynthMinidump::Stream;
 using google_breakpad::SynthMinidump::String;
 using google_breakpad::SynthMinidump::SystemInfo;
@@ -69,7 +75,6 @@ using google_breakpad::test_assembler::kBigEndian;
 using google_breakpad::test_assembler::kLittleEndian;
 using std::ifstream;
 using std::istringstream;
-using std::string;
 using std::vector;
 using ::testing::Return;
 
@@ -88,8 +93,16 @@ TEST_F(MinidumpTest, TestMinidumpFromFile) {
   ASSERT_TRUE(minidump.Read());
   const MDRawHeader* header = minidump.header();
   ASSERT_NE(header, (MDRawHeader*)NULL);
-  ASSERT_EQ(header->signature, u_int32_t(MD_HEADER_SIGNATURE));
-  //TODO: add more checks here
+  ASSERT_EQ(header->signature, uint32_t(MD_HEADER_SIGNATURE));
+
+  MinidumpModuleList *md_module_list = minidump.GetModuleList();
+  ASSERT_TRUE(md_module_list != NULL);
+  const MinidumpModule *md_module = md_module_list->GetModuleAtIndex(0);
+  ASSERT_TRUE(md_module != NULL);
+  ASSERT_EQ("c:\\test_app.exe", md_module->code_file());
+  ASSERT_EQ("c:\\test_app.pdb", md_module->debug_file());
+  ASSERT_EQ("45D35F6C2d000", md_module->code_identifier());
+  ASSERT_EQ("5A9832E5287241C1838ED98914E9B7FF1", md_module->debug_identifier());
 }
 
 TEST_F(MinidumpTest, TestMinidumpFromStream) {
@@ -114,7 +127,7 @@ TEST_F(MinidumpTest, TestMinidumpFromStream) {
   ASSERT_TRUE(minidump.Read());
   const MDRawHeader* header = minidump.header();
   ASSERT_NE(header, (MDRawHeader*)NULL);
-  ASSERT_EQ(header->signature, u_int32_t(MD_HEADER_SIGNATURE));
+  ASSERT_EQ(header->signature, uint32_t(MD_HEADER_SIGNATURE));
   //TODO: add more checks here
 }
 
@@ -158,7 +171,7 @@ TEST(Dump, OneStream) {
   ASSERT_TRUE(dir != NULL);
   EXPECT_EQ(0xfbb7fa2bU, dir->stream_type);
 
-  u_int32_t stream_length;
+  uint32_t stream_length;
   ASSERT_TRUE(minidump.SeekToStreamType(0xfbb7fa2bU, &stream_length));
   ASSERT_EQ(15U, stream_length);
   char stream_contents[15];
@@ -192,7 +205,7 @@ TEST(Dump, OneMemory) {
 
   const MDRawDirectory *dir = minidump.GetDirectoryEntryAtIndex(0);
   ASSERT_TRUE(dir != NULL);
-  EXPECT_EQ((u_int32_t) MD_MEMORY_LIST_STREAM, dir->stream_type);
+  EXPECT_EQ((uint32_t) MD_MEMORY_LIST_STREAM, dir->stream_type);
 
   MinidumpMemoryList *memory_list = minidump.GetMemoryList();
   ASSERT_TRUE(memory_list != NULL);
@@ -201,7 +214,7 @@ TEST(Dump, OneMemory) {
   MinidumpMemoryRegion *region1 = memory_list->GetMemoryRegionAtIndex(0);
   ASSERT_EQ(0x309d68010bd21b2cULL, region1->GetBase());
   ASSERT_EQ(15U, region1->GetSize());
-  const u_int8_t *region1_bytes = region1->GetMemory();
+  const uint8_t *region1_bytes = region1->GetMemory();
   ASSERT_TRUE(memcmp("memory contents", region1_bytes, 15) == 0);
 }
 
@@ -212,6 +225,7 @@ TEST(Dump, OneThread) {
   stack.Append("stack for thread");
 
   MDRawContextX86 raw_context;
+  const uint32_t kExpectedEIP = 0x6913f540;
   raw_context.context_flags = MD_CONTEXT_X86_INTEGER | MD_CONTEXT_X86_CONTROL;
   raw_context.edi = 0x3ecba80d;
   raw_context.esi = 0x382583b9;
@@ -220,7 +234,7 @@ TEST(Dump, OneThread) {
   raw_context.ecx = 0x46a6a6a8;
   raw_context.eax = 0x6a5025e2;
   raw_context.ebp = 0xd9fabb4a;
-  raw_context.eip = 0x6913f540;
+  raw_context.eip = kExpectedEIP;
   raw_context.cs = 0xbffe6eda;
   raw_context.eflags = 0xb2ce1e2d;
   raw_context.esp = 0x659caaa4;
@@ -250,7 +264,7 @@ TEST(Dump, OneThread) {
   MinidumpMemoryRegion *md_region = md_memory_list->GetMemoryRegionAtIndex(0);
   ASSERT_EQ(0x2326a0faU, md_region->GetBase());
   ASSERT_EQ(16U, md_region->GetSize());
-  const u_int8_t *region_bytes = md_region->GetMemory();
+  const uint8_t *region_bytes = md_region->GetMemory();
   ASSERT_TRUE(memcmp("stack for thread", region_bytes, 16) == 0);
 
   MinidumpThreadList *thread_list = minidump.GetThreadList();
@@ -259,22 +273,27 @@ TEST(Dump, OneThread) {
 
   MinidumpThread *md_thread = thread_list->GetThreadAtIndex(0);
   ASSERT_TRUE(md_thread != NULL);
-  u_int32_t thread_id;
+  uint32_t thread_id;
   ASSERT_TRUE(md_thread->GetThreadID(&thread_id));
   ASSERT_EQ(0xa898f11bU, thread_id);
   MinidumpMemoryRegion *md_stack = md_thread->GetMemory();
   ASSERT_TRUE(md_stack != NULL);
   ASSERT_EQ(0x2326a0faU, md_stack->GetBase());
   ASSERT_EQ(16U, md_stack->GetSize());
-  const u_int8_t *md_stack_bytes = md_stack->GetMemory();
+  const uint8_t *md_stack_bytes = md_stack->GetMemory();
   ASSERT_TRUE(memcmp("stack for thread", md_stack_bytes, 16) == 0);
 
   MinidumpContext *md_context = md_thread->GetContext();
   ASSERT_TRUE(md_context != NULL);
-  ASSERT_EQ((u_int32_t) MD_CONTEXT_X86, md_context->GetContextCPU());
+  ASSERT_EQ((uint32_t) MD_CONTEXT_X86, md_context->GetContextCPU());
+
+  uint64_t eip;
+  ASSERT_TRUE(md_context->GetInstructionPointer(&eip));
+  EXPECT_EQ(kExpectedEIP, eip);
+
   const MDRawContextX86 *md_raw_context = md_context->GetContextX86();
   ASSERT_TRUE(md_raw_context != NULL);
-  ASSERT_EQ((u_int32_t) (MD_CONTEXT_X86_INTEGER | MD_CONTEXT_X86_CONTROL),
+  ASSERT_EQ((uint32_t) (MD_CONTEXT_X86_INTEGER | MD_CONTEXT_X86_CONTROL),
             (md_raw_context->context_flags
              & (MD_CONTEXT_X86_INTEGER | MD_CONTEXT_X86_CONTROL)));
   EXPECT_EQ(0x3ecba80dU, raw_context.edi);
@@ -284,53 +303,212 @@ TEST(Dump, OneThread) {
   EXPECT_EQ(0x46a6a6a8U, raw_context.ecx);
   EXPECT_EQ(0x6a5025e2U, raw_context.eax);
   EXPECT_EQ(0xd9fabb4aU, raw_context.ebp);
-  EXPECT_EQ(0x6913f540U, raw_context.eip);
+  EXPECT_EQ(kExpectedEIP, raw_context.eip);
   EXPECT_EQ(0xbffe6edaU, raw_context.cs);
   EXPECT_EQ(0xb2ce1e2dU, raw_context.eflags);
   EXPECT_EQ(0x659caaa4U, raw_context.esp);
   EXPECT_EQ(0x2e951ef7U, raw_context.ss);
 }
 
-TEST(Dump, OneModule) {
-  static const MDVSFixedFileInfo fixed_file_info = {
-    0xb2fba33a,                           // signature
-    0x33d7a728,                           // struct_version
-    0x31afcb20,                           // file_version_hi
-    0xe51cdab1,                           // file_version_lo
-    0xd1ea6907,                           // product_version_hi
-    0x03032857,                           // product_version_lo
-    0x11bf71d7,                           // file_flags_mask
-    0x5fb8cdbf,                           // file_flags
-    0xe45d0d5d,                           // file_os
-    0x107d9562,                           // file_type
-    0x5a8844d4,                           // file_subtype
-    0xa8d30b20,                           // file_date_hi
-    0x651c3e4e                            // file_date_lo
-  };
+TEST(Dump, ThreadMissingMemory) {
+  Dump dump(0, kLittleEndian);
+  Memory stack(dump, 0x2326a0fa);
+  // Stack has no contents.
 
-  Dump dump(0, kBigEndian);
-  String module_name(dump, "single module");
-  Module module(dump, 0xa90206ca83eb2852ULL, 0xada542bd,
-                module_name,
-                0xb1054d2a,
-                0x34571371,
-                fixed_file_info, // from synth_minidump_unittest_data.h
-                NULL, NULL);
+  MDRawContextX86 raw_context;
+  memset(&raw_context, 0, sizeof(raw_context));
+  raw_context.context_flags = MD_CONTEXT_X86_INTEGER | MD_CONTEXT_X86_CONTROL;
+  Context context(dump, raw_context);
 
-  dump.Add(&module);
-  dump.Add(&module_name);
+  Thread thread(dump, 0xa898f11b, stack, context,
+                0x9e39439f, 0x4abfc15f, 0xe499898a, 0x0d43e939dcfd0372ULL);
+
+  dump.Add(&stack);
+  dump.Add(&context);
+  dump.Add(&thread);
   dump.Finish();
-  
+
+  string contents;
+  ASSERT_TRUE(dump.GetContents(&contents));
+
+  istringstream minidump_stream(contents);
+  Minidump minidump(minidump_stream);
+  ASSERT_TRUE(minidump.Read());
+  ASSERT_EQ(2U, minidump.GetDirectoryEntryCount());
+
+  // This should succeed even though the thread has no stack memory.
+  MinidumpThreadList* thread_list = minidump.GetThreadList();
+  ASSERT_TRUE(thread_list != NULL);
+  ASSERT_EQ(1U, thread_list->thread_count());
+
+  MinidumpThread* md_thread = thread_list->GetThreadAtIndex(0);
+  ASSERT_TRUE(md_thread != NULL);
+
+  uint32_t thread_id;
+  ASSERT_TRUE(md_thread->GetThreadID(&thread_id));
+  ASSERT_EQ(0xa898f11bU, thread_id);
+
+  MinidumpContext* md_context = md_thread->GetContext();
+  ASSERT_NE(reinterpret_cast<MinidumpContext*>(NULL), md_context);
+
+  MinidumpMemoryRegion* md_stack = md_thread->GetMemory();
+  ASSERT_EQ(reinterpret_cast<MinidumpMemoryRegion*>(NULL), md_stack);
+}
+
+TEST(Dump, ThreadMissingContext) {
+  Dump dump(0, kLittleEndian);
+  Memory stack(dump, 0x2326a0fa);
+  stack.Append("stack for thread");
+
+  // Context is empty.
+  Context context(dump);
+
+  Thread thread(dump, 0xa898f11b, stack, context,
+                0x9e39439f, 0x4abfc15f, 0xe499898a, 0x0d43e939dcfd0372ULL);
+
+  dump.Add(&stack);
+  dump.Add(&context);
+  dump.Add(&thread);
+  dump.Finish();
+
+  string contents;
+  ASSERT_TRUE(dump.GetContents(&contents));
+
+  istringstream minidump_stream(contents);
+  Minidump minidump(minidump_stream);
+  ASSERT_TRUE(minidump.Read());
+  ASSERT_EQ(2U, minidump.GetDirectoryEntryCount());
+
+  // This should succeed even though the thread has no stack memory.
+  MinidumpThreadList* thread_list = minidump.GetThreadList();
+  ASSERT_TRUE(thread_list != NULL);
+  ASSERT_EQ(1U, thread_list->thread_count());
+
+  MinidumpThread* md_thread = thread_list->GetThreadAtIndex(0);
+  ASSERT_TRUE(md_thread != NULL);
+
+  uint32_t thread_id;
+  ASSERT_TRUE(md_thread->GetThreadID(&thread_id));
+  ASSERT_EQ(0xa898f11bU, thread_id);
+  MinidumpMemoryRegion* md_stack = md_thread->GetMemory();
+  ASSERT_NE(reinterpret_cast<MinidumpMemoryRegion*>(NULL), md_stack);
+
+  MinidumpContext* md_context = md_thread->GetContext();
+  ASSERT_EQ(reinterpret_cast<MinidumpContext*>(NULL), md_context);
+}
+
+TEST(Dump, OneUnloadedModule) {
+  Dump dump(0, kBigEndian);
+  String module_name(dump, "unloaded module");
+
+  String csd_version(dump, "Windows 9000");
+  SystemInfo system_info(dump, SystemInfo::windows_x86, csd_version);
+
+  UnloadedModule unloaded_module(
+      dump,
+      0xa90206ca83eb2852ULL,
+      0xada542bd,
+      module_name,
+      0x34571371,
+      0xb1054d2a);
+
+  dump.Add(&unloaded_module);
+  dump.Add(&module_name);
+  dump.Add(&system_info);
+  dump.Add(&csd_version);
+  dump.Finish();
+
   string contents;
   ASSERT_TRUE(dump.GetContents(&contents));
   istringstream minidump_stream(contents);
   Minidump minidump(minidump_stream);
   ASSERT_TRUE(minidump.Read());
-  ASSERT_EQ(1U, minidump.GetDirectoryEntryCount());
+  ASSERT_EQ(2U, minidump.GetDirectoryEntryCount());
 
-  const MDRawDirectory *dir = minidump.GetDirectoryEntryAtIndex(0);
+  const MDRawDirectory *dir = minidump.GetDirectoryEntryAtIndex(1);
   ASSERT_TRUE(dir != NULL);
-  EXPECT_EQ((u_int32_t) MD_MODULE_LIST_STREAM, dir->stream_type);
+  EXPECT_EQ((uint32_t) MD_UNLOADED_MODULE_LIST_STREAM, dir->stream_type);
+
+  MinidumpUnloadedModuleList *md_unloaded_module_list =
+      minidump.GetUnloadedModuleList();
+  ASSERT_TRUE(md_unloaded_module_list != NULL);
+  ASSERT_EQ(1U, md_unloaded_module_list->module_count());
+
+  const MinidumpUnloadedModule *md_unloaded_module =
+      md_unloaded_module_list->GetModuleAtIndex(0);
+  ASSERT_TRUE(md_unloaded_module != NULL);
+  ASSERT_EQ(0xa90206ca83eb2852ULL, md_unloaded_module->base_address());
+  ASSERT_EQ(0xada542bd, md_unloaded_module->size());
+  ASSERT_EQ("unloaded module", md_unloaded_module->code_file());
+  ASSERT_EQ("", md_unloaded_module->debug_file());
+  // time_date_stamp and size_of_image concatenated
+  ASSERT_EQ("B1054D2Aada542bd", md_unloaded_module->code_identifier());
+  ASSERT_EQ("", md_unloaded_module->debug_identifier());
+
+  const MDRawUnloadedModule *md_raw_unloaded_module =
+      md_unloaded_module->module();
+  ASSERT_TRUE(md_raw_unloaded_module != NULL);
+  ASSERT_EQ(0xb1054d2aU, md_raw_unloaded_module->time_date_stamp);
+  ASSERT_EQ(0x34571371U, md_raw_unloaded_module->checksum);
+}
+
+static const MDVSFixedFileInfo fixed_file_info = {
+  0xb2fba33a,                           // signature
+  0x33d7a728,                           // struct_version
+  0x31afcb20,                           // file_version_hi
+  0xe51cdab1,                           // file_version_lo
+  0xd1ea6907,                           // product_version_hi
+  0x03032857,                           // product_version_lo
+  0x11bf71d7,                           // file_flags_mask
+  0x5fb8cdbf,                           // file_flags
+  0xe45d0d5d,                           // file_os
+  0x107d9562,                           // file_type
+  0x5a8844d4,                           // file_subtype
+  0xa8d30b20,                           // file_date_hi
+  0x651c3e4e                            // file_date_lo
+};
+
+TEST(Dump, OneModule) {
+  Dump dump(0, kBigEndian);
+  String module_name(dump, "single module");
+  Section cv_info(dump);
+  cv_info
+    .D32(MD_CVINFOPDB70_SIGNATURE)  // signature
+    // signature, a MDGUID
+    .D32(0xabcd1234)
+    .D16(0xf00d)
+    .D16(0xbeef)
+    .Append("\x01\x02\x03\x04\x05\x06\x07\x08")
+    .D32(1) // age
+    .AppendCString("c:\\foo\\file.pdb");  // pdb_file_name
+
+  String csd_version(dump, "Windows 9000");
+  SystemInfo system_info(dump, SystemInfo::windows_x86, csd_version);
+
+  Module module(dump, 0xa90206ca83eb2852ULL, 0xada542bd,
+                module_name,
+                0xb1054d2a,
+                0x34571371,
+                fixed_file_info, // from synth_minidump_unittest_data.h
+                &cv_info, nullptr);
+
+  dump.Add(&module);
+  dump.Add(&module_name);
+  dump.Add(&cv_info);
+  dump.Add(&system_info);
+  dump.Add(&csd_version);
+  dump.Finish();
+
+  string contents;
+  ASSERT_TRUE(dump.GetContents(&contents));
+  istringstream minidump_stream(contents);
+  Minidump minidump(minidump_stream);
+  ASSERT_TRUE(minidump.Read());
+  ASSERT_EQ(2U, minidump.GetDirectoryEntryCount());
+
+  const MDRawDirectory *dir = minidump.GetDirectoryEntryAtIndex(1);
+  ASSERT_TRUE(dir != NULL);
+  EXPECT_EQ((uint32_t) MD_MODULE_LIST_STREAM, dir->stream_type);
 
   MinidumpModuleList *md_module_list = minidump.GetModuleList();
   ASSERT_TRUE(md_module_list != NULL);
@@ -341,6 +519,10 @@ TEST(Dump, OneModule) {
   ASSERT_EQ(0xa90206ca83eb2852ULL, md_module->base_address());
   ASSERT_EQ(0xada542bd, md_module->size());
   ASSERT_EQ("single module", md_module->code_file());
+  ASSERT_EQ("c:\\foo\\file.pdb", md_module->debug_file());
+  // time_date_stamp and size_of_image concatenated
+  ASSERT_EQ("B1054D2Aada542bd", md_module->code_identifier());
+  ASSERT_EQ("ABCD1234F00DBEEF01020304050607081", md_module->debug_identifier());
 
   const MDRawModule *md_raw_module = md_module->module();
   ASSERT_TRUE(md_raw_module != NULL);
@@ -348,6 +530,231 @@ TEST(Dump, OneModule) {
   ASSERT_EQ(0x34571371U, md_raw_module->checksum);
   ASSERT_TRUE(memcmp(&md_raw_module->version_info, &fixed_file_info,
                      sizeof(fixed_file_info)) == 0);
+}
+
+// Test that a module with a MDCVInfoELF CV record is handled properly.
+TEST(Dump, OneModuleCVELF) {
+  Dump dump(0, kLittleEndian);
+  String module_name(dump, "elf module");
+  Section cv_info(dump);
+  cv_info
+    .D32(MD_CVINFOELF_SIGNATURE)  // signature
+    // build_id
+    .Append("\x5f\xa9\xcd\xb4\x10\x53\xdf\x1b\x86\xfa\xb7\x33\xb4\xdf"
+            "\x37\x38\xce\xa3\x4a\x87");
+
+  const MDRawSystemInfo linux_x86 = {
+    MD_CPU_ARCHITECTURE_X86,              // processor_architecture
+    6,                                    // processor_level
+    0xd08,                                // processor_revision
+    1,                                    // number_of_processors
+    0,                                    // product_type
+    0,                                    // major_version
+    0,                                    // minor_version
+    0,                                    // build_number
+    MD_OS_LINUX,                          // platform_id
+    0xdeadbeef,                           // csd_version_rva
+    0x100,                                // suite_mask
+    0,                                    // reserved2
+    {                                     // cpu
+      { // x86_cpu_info
+        { 0x756e6547, 0x49656e69, 0x6c65746e }, // vendor_id
+        0x6d8,                                  // version_information
+        0xafe9fbff,                             // feature_information
+        0xffffffff                              // amd_extended_cpu_features
+      }
+    }
+  };
+  String csd_version(dump, "Literally Linux");
+  SystemInfo system_info(dump, linux_x86, csd_version);
+
+  Module module(dump, 0xa90206ca83eb2852ULL, 0xada542bd,
+                module_name,
+                0xb1054d2a,
+                0x34571371,
+                fixed_file_info, // from synth_minidump_unittest_data.h
+                &cv_info, nullptr);
+
+  dump.Add(&module);
+  dump.Add(&module_name);
+  dump.Add(&cv_info);
+  dump.Add(&system_info);
+  dump.Add(&csd_version);
+  dump.Finish();
+
+  string contents;
+  ASSERT_TRUE(dump.GetContents(&contents));
+  istringstream minidump_stream(contents);
+  Minidump minidump(minidump_stream);
+  ASSERT_TRUE(minidump.Read());
+
+  MinidumpModuleList *md_module_list = minidump.GetModuleList();
+  ASSERT_TRUE(md_module_list != NULL);
+  ASSERT_EQ(1U, md_module_list->module_count());
+
+  const MinidumpModule *md_module = md_module_list->GetModuleAtIndex(0);
+  ASSERT_TRUE(md_module != NULL);
+  ASSERT_EQ(0xa90206ca83eb2852ULL, md_module->base_address());
+  ASSERT_EQ(0xada542bd, md_module->size());
+  ASSERT_EQ("elf module", md_module->code_file());
+  // debug_file == code_file
+  ASSERT_EQ("elf module", md_module->debug_file());
+  // just the build_id, directly
+  ASSERT_EQ("5fa9cdb41053df1b86fab733b4df3738cea34a87",
+            md_module->code_identifier());
+  // build_id truncted to GUID length and treated as such, with zero
+  // age appended
+  ASSERT_EQ("B4CDA95F53101BDF86FAB733B4DF37380", md_module->debug_identifier());
+
+  const MDRawModule *md_raw_module = md_module->module();
+  ASSERT_TRUE(md_raw_module != NULL);
+  ASSERT_EQ(0xb1054d2aU, md_raw_module->time_date_stamp);
+  ASSERT_EQ(0x34571371U, md_raw_module->checksum);
+  ASSERT_TRUE(memcmp(&md_raw_module->version_info, &fixed_file_info,
+                     sizeof(fixed_file_info)) == 0);
+}
+
+// Test that a build_id that's shorter than a GUID is handled properly.
+TEST(Dump, CVELFShort) {
+  Dump dump(0, kLittleEndian);
+  String module_name(dump, "elf module");
+  Section cv_info(dump);
+  cv_info
+    .D32(MD_CVINFOELF_SIGNATURE)  // signature
+    // build_id, shorter than a GUID
+    .Append("\x5f\xa9\xcd\xb4");
+
+  const MDRawSystemInfo linux_x86 = {
+    MD_CPU_ARCHITECTURE_X86,              // processor_architecture
+    6,                                    // processor_level
+    0xd08,                                // processor_revision
+    1,                                    // number_of_processors
+    0,                                    // product_type
+    0,                                    // major_version
+    0,                                    // minor_version
+    0,                                    // build_number
+    MD_OS_LINUX,                          // platform_id
+    0xdeadbeef,                           // csd_version_rva
+    0x100,                                // suite_mask
+    0,                                    // reserved2
+    {                                     // cpu
+      { // x86_cpu_info
+        { 0x756e6547, 0x49656e69, 0x6c65746e }, // vendor_id
+        0x6d8,                                  // version_information
+        0xafe9fbff,                             // feature_information
+        0xffffffff                              // amd_extended_cpu_features
+      }
+    }
+  };
+  String csd_version(dump, "Literally Linux");
+  SystemInfo system_info(dump, linux_x86, csd_version);
+
+  Module module(dump, 0xa90206ca83eb2852ULL, 0xada542bd,
+                module_name,
+                0xb1054d2a,
+                0x34571371,
+                fixed_file_info, // from synth_minidump_unittest_data.h
+                &cv_info, nullptr);
+
+  dump.Add(&module);
+  dump.Add(&module_name);
+  dump.Add(&cv_info);
+  dump.Add(&system_info);
+  dump.Add(&csd_version);
+  dump.Finish();
+
+  string contents;
+  ASSERT_TRUE(dump.GetContents(&contents));
+  istringstream minidump_stream(contents);
+  Minidump minidump(minidump_stream);
+  ASSERT_TRUE(minidump.Read());
+  ASSERT_EQ(2U, minidump.GetDirectoryEntryCount());
+
+  MinidumpModuleList *md_module_list = minidump.GetModuleList();
+  ASSERT_TRUE(md_module_list != NULL);
+  ASSERT_EQ(1U, md_module_list->module_count());
+
+  const MinidumpModule *md_module = md_module_list->GetModuleAtIndex(0);
+  ASSERT_TRUE(md_module != NULL);
+  // just the build_id, directly
+  ASSERT_EQ("5fa9cdb4", md_module->code_identifier());
+  // build_id expanded to GUID length and treated as such, with zero
+  // age appended
+  ASSERT_EQ("B4CDA95F0000000000000000000000000", md_module->debug_identifier());
+}
+
+// Test that a build_id that's very long is handled properly.
+TEST(Dump, CVELFLong) {
+  Dump dump(0, kLittleEndian);
+  String module_name(dump, "elf module");
+  Section cv_info(dump);
+  cv_info
+    .D32(MD_CVINFOELF_SIGNATURE)  // signature
+    // build_id, lots of bytes
+    .Append("\x5f\xa9\xcd\xb4\x10\x53\xdf\x1b\x86\xfa\xb7\x33\xb4\xdf"
+            "\x37\x38\xce\xa3\x4a\x87\x01\x02\x03\x04\x05\x06\x07\x08"
+            "\x09\x0a\x0b\x0c\x0d\x0e\x0f");
+
+
+  const MDRawSystemInfo linux_x86 = {
+    MD_CPU_ARCHITECTURE_X86,              // processor_architecture
+    6,                                    // processor_level
+    0xd08,                                // processor_revision
+    1,                                    // number_of_processors
+    0,                                    // product_type
+    0,                                    // major_version
+    0,                                    // minor_version
+    0,                                    // build_number
+    MD_OS_LINUX,                          // platform_id
+    0xdeadbeef,                           // csd_version_rva
+    0x100,                                // suite_mask
+    0,                                    // reserved2
+    {                                     // cpu
+      { // x86_cpu_info
+        { 0x756e6547, 0x49656e69, 0x6c65746e }, // vendor_id
+        0x6d8,                                  // version_information
+        0xafe9fbff,                             // feature_information
+        0xffffffff                              // amd_extended_cpu_features
+      }
+    }
+  };
+  String csd_version(dump, "Literally Linux");
+  SystemInfo system_info(dump, linux_x86, csd_version);
+
+  Module module(dump, 0xa90206ca83eb2852ULL, 0xada542bd,
+                module_name,
+                0xb1054d2a,
+                0x34571371,
+                fixed_file_info, // from synth_minidump_unittest_data.h
+                &cv_info, nullptr);
+
+  dump.Add(&module);
+  dump.Add(&module_name);
+  dump.Add(&cv_info);
+  dump.Add(&system_info);
+  dump.Add(&csd_version);
+  dump.Finish();
+
+  string contents;
+  ASSERT_TRUE(dump.GetContents(&contents));
+  istringstream minidump_stream(contents);
+  Minidump minidump(minidump_stream);
+  ASSERT_TRUE(minidump.Read());
+  ASSERT_EQ(2U, minidump.GetDirectoryEntryCount());
+
+  MinidumpModuleList *md_module_list = minidump.GetModuleList();
+  ASSERT_TRUE(md_module_list != NULL);
+  ASSERT_EQ(1U, md_module_list->module_count());
+
+  const MinidumpModule *md_module = md_module_list->GetModuleAtIndex(0);
+  ASSERT_TRUE(md_module != NULL);
+  // just the build_id, directly
+  ASSERT_EQ(
+      "5fa9cdb41053df1b86fab733b4df3738cea34a870102030405060708090a0b0c0d0e0f",
+      md_module->code_identifier());
+  // build_id truncated to GUID length and treated as such, with zero
+  // age appended.
+  ASSERT_EQ("B4CDA95F53101BDF86FAB733B4DF37380", md_module->debug_identifier());
 }
 
 TEST(Dump, OneSystemInfo) {
@@ -368,7 +775,7 @@ TEST(Dump, OneSystemInfo) {
 
   const MDRawDirectory *dir = minidump.GetDirectoryEntryAtIndex(0);
   ASSERT_TRUE(dir != NULL);
-  EXPECT_EQ((u_int32_t) MD_SYSTEM_INFO_STREAM, dir->stream_type);
+  EXPECT_EQ((uint32_t) MD_SYSTEM_INFO_STREAM, dir->stream_type);
 
   MinidumpSystemInfo *md_system_info = minidump.GetSystemInfo();
   ASSERT_TRUE(md_system_info != NULL);
@@ -464,6 +871,32 @@ TEST(Dump, BigDump) {
   dump.Add(&module3_name);
   dump.Add(&module3);
 
+  // Unloaded modules!
+  uint64_t umodule1_base = 0xeb77da57b5d4cbdaULL;
+  uint32_t umodule1_size = 0x83cd5a37;
+  String umodule1_name(dump, "unloaded module one");
+  UnloadedModule unloaded_module1(dump, umodule1_base, umodule1_size,
+                                  umodule1_name);
+  dump.Add(&umodule1_name);
+  dump.Add(&unloaded_module1);
+
+  uint64_t umodule2_base = 0xeb77da57b5d4cbdaULL;
+  uint32_t umodule2_size = 0x83cd5a37;
+  String umodule2_name(dump, "unloaded module two");
+  UnloadedModule unloaded_module2(dump, umodule2_base, umodule2_size,
+                                  umodule2_name);
+  dump.Add(&umodule2_name);
+  dump.Add(&unloaded_module2);
+
+  uint64_t umodule3_base = 0xeb77da5839a20000ULL;
+  uint32_t umodule3_size = 0x83cd5a37;
+  String umodule3_name(dump, "unloaded module three");
+  UnloadedModule unloaded_module3(dump, umodule3_base, umodule3_size,
+                                  umodule3_name);
+  dump.Add(&umodule3_name);
+  dump.Add(&unloaded_module3);
+
+
   // Add one more memory region, on top of the five stacks.
   Memory memory5(dump, 0x61979e828040e564ULL);
   memory5.Append("contents of memory 5");
@@ -476,13 +909,13 @@ TEST(Dump, BigDump) {
   istringstream minidump_stream(contents);
   Minidump minidump(minidump_stream);
   ASSERT_TRUE(minidump.Read());
-  ASSERT_EQ(4U, minidump.GetDirectoryEntryCount());
+  ASSERT_EQ(5U, minidump.GetDirectoryEntryCount());
 
   // Check the threads.
   MinidumpThreadList *thread_list = minidump.GetThreadList();
   ASSERT_TRUE(thread_list != NULL);
   ASSERT_EQ(5U, thread_list->thread_count());
-  u_int32_t thread_id;
+  uint32_t thread_id;
   ASSERT_TRUE(thread_list->GetThreadAtIndex(0)->GetThreadID(&thread_id));
   ASSERT_EQ(0xbbef4432U, thread_id);
   ASSERT_EQ(0x70b9ebfcU,
@@ -533,6 +966,29 @@ TEST(Dump, BigDump) {
             md_module_list->GetModuleAtIndex(1)->base_address());
   EXPECT_EQ(0x95fc1544da321b6cULL,
             md_module_list->GetModuleAtIndex(2)->base_address());
+
+  // Check unloaded modules
+  MinidumpUnloadedModuleList *md_unloaded_module_list =
+      minidump.GetUnloadedModuleList();
+  ASSERT_TRUE(md_unloaded_module_list != NULL);
+  ASSERT_EQ(3U, md_unloaded_module_list->module_count());
+  EXPECT_EQ(umodule1_base,
+            md_unloaded_module_list->GetModuleAtIndex(0)->base_address());
+  EXPECT_EQ(umodule2_base,
+            md_unloaded_module_list->GetModuleAtIndex(1)->base_address());
+  EXPECT_EQ(umodule3_base,
+            md_unloaded_module_list->GetModuleAtIndex(2)->base_address());
+
+  const MinidumpUnloadedModule *umodule =
+      md_unloaded_module_list->GetModuleForAddress(
+          umodule1_base + umodule1_size / 2);
+  EXPECT_EQ(umodule1_base, umodule->base_address());
+
+  umodule = md_unloaded_module_list->GetModuleAtSequence(0);
+  EXPECT_EQ(umodule1_base, umodule->base_address());
+
+  EXPECT_EQ(NULL, md_unloaded_module_list->GetMainModule());
+
 }
 
 TEST(Dump, OneMemoryInfo) {
@@ -540,15 +996,15 @@ TEST(Dump, OneMemoryInfo) {
   Stream stream(dump, MD_MEMORY_INFO_LIST_STREAM);
 
   // Add the MDRawMemoryInfoList header.
-  const u_int64_t kNumberOfEntries = 1;
+  const uint64_t kNumberOfEntries = 1;
   stream.D32(sizeof(MDRawMemoryInfoList))  // size_of_header
         .D32(sizeof(MDRawMemoryInfo))      // size_of_entry
         .D64(kNumberOfEntries);            // number_of_entries
 
   
   // Now add a MDRawMemoryInfo entry.
-  const u_int64_t kBaseAddress = 0x1000;
-  const u_int64_t kRegionSize = 0x2000;
+  const uint64_t kBaseAddress = 0x1000;
+  const uint64_t kRegionSize = 0x2000;
   stream.D64(kBaseAddress)                         // base_address
         .D64(kBaseAddress)                         // allocation_base
         .D32(MD_MEMORY_PROTECT_EXECUTE_READWRITE)  // allocation_protection
@@ -571,7 +1027,7 @@ TEST(Dump, OneMemoryInfo) {
 
   const MDRawDirectory *dir = minidump.GetDirectoryEntryAtIndex(0);
   ASSERT_TRUE(dir != NULL);
-  EXPECT_EQ((u_int32_t) MD_MEMORY_INFO_LIST_STREAM, dir->stream_type);
+  EXPECT_EQ((uint32_t) MD_MEMORY_INFO_LIST_STREAM, dir->stream_type);
 
   MinidumpMemoryInfoList *info_list = minidump.GetMemoryInfoList();
   ASSERT_TRUE(info_list != NULL);
@@ -630,9 +1086,9 @@ TEST(Dump, OneExceptionX86) {
   MinidumpException *md_exception = minidump.GetException();
   ASSERT_TRUE(md_exception != NULL);
 
-  u_int32_t thread_id;
+  uint32_t thread_id;
   ASSERT_TRUE(md_exception->GetThreadID(&thread_id));
-  ASSERT_EQ(0x1234abcd, thread_id);
+  ASSERT_EQ(0x1234abcdU, thread_id);
 
   const MDRawExceptionStream* raw_exception = md_exception->exception();
   ASSERT_TRUE(raw_exception != NULL);
@@ -643,10 +1099,10 @@ TEST(Dump, OneExceptionX86) {
 
   MinidumpContext *md_context = md_exception->GetContext();
   ASSERT_TRUE(md_context != NULL);
-  ASSERT_EQ((u_int32_t) MD_CONTEXT_X86, md_context->GetContextCPU());
+  ASSERT_EQ((uint32_t) MD_CONTEXT_X86, md_context->GetContextCPU());
   const MDRawContextX86 *md_raw_context = md_context->GetContextX86();
   ASSERT_TRUE(md_raw_context != NULL);
-  ASSERT_EQ((u_int32_t) (MD_CONTEXT_X86_INTEGER | MD_CONTEXT_X86_CONTROL),
+  ASSERT_EQ((uint32_t) (MD_CONTEXT_X86_INTEGER | MD_CONTEXT_X86_CONTROL),
             (md_raw_context->context_flags
              & (MD_CONTEXT_X86_INTEGER | MD_CONTEXT_X86_CONTROL)));
   EXPECT_EQ(0x3ecba80dU, raw_context.edi);
@@ -704,9 +1160,9 @@ TEST(Dump, OneExceptionX86XState) {
   MinidumpException *md_exception = minidump.GetException();
   ASSERT_TRUE(md_exception != NULL);
 
-  u_int32_t thread_id;
+  uint32_t thread_id;
   ASSERT_TRUE(md_exception->GetThreadID(&thread_id));
-  ASSERT_EQ(0x1234abcd, thread_id);
+  ASSERT_EQ(0x1234abcdU, thread_id);
 
   const MDRawExceptionStream* raw_exception = md_exception->exception();
   ASSERT_TRUE(raw_exception != NULL);
@@ -717,10 +1173,10 @@ TEST(Dump, OneExceptionX86XState) {
 
   MinidumpContext *md_context = md_exception->GetContext();
   ASSERT_TRUE(md_context != NULL);
-  ASSERT_EQ((u_int32_t) MD_CONTEXT_X86, md_context->GetContextCPU());
+  ASSERT_EQ((uint32_t) MD_CONTEXT_X86, md_context->GetContextCPU());
   const MDRawContextX86 *md_raw_context = md_context->GetContextX86();
   ASSERT_TRUE(md_raw_context != NULL);
-  ASSERT_EQ((u_int32_t) (MD_CONTEXT_X86_INTEGER | MD_CONTEXT_X86_CONTROL),
+  ASSERT_EQ((uint32_t) (MD_CONTEXT_X86_INTEGER | MD_CONTEXT_X86_CONTROL),
             (md_raw_context->context_flags
              & (MD_CONTEXT_X86_INTEGER | MD_CONTEXT_X86_CONTROL)));
   EXPECT_EQ(0x3ecba80dU, raw_context.edi);
@@ -735,6 +1191,158 @@ TEST(Dump, OneExceptionX86XState) {
   EXPECT_EQ(0xb2ce1e2dU, raw_context.eflags);
   EXPECT_EQ(0x659caaa4U, raw_context.esp);
   EXPECT_EQ(0x2e951ef7U, raw_context.ss);
+}
+
+// Testing that the CPU type can be loaded from a system info stream when
+// the CPU flags are missing from the context_flags of an exception record
+TEST(Dump, OneExceptionX86NoCPUFlags) {
+  Dump dump(0, kLittleEndian);
+
+  MDRawContextX86 raw_context;
+  // Intentionally not setting CPU type in the context_flags
+  raw_context.context_flags = 0;
+  raw_context.edi = 0x3ecba80d;
+  raw_context.esi = 0x382583b9;
+  raw_context.ebx = 0x7fccc03f;
+  raw_context.edx = 0xf62f8ec2;
+  raw_context.ecx = 0x46a6a6a8;
+  raw_context.eax = 0x6a5025e2;
+  raw_context.ebp = 0xd9fabb4a;
+  raw_context.eip = 0x6913f540;
+  raw_context.cs = 0xbffe6eda;
+  raw_context.eflags = 0xb2ce1e2d;
+  raw_context.esp = 0x659caaa4;
+  raw_context.ss = 0x2e951ef7;
+  Context context(dump, raw_context);
+
+  Exception exception(dump, context,
+                      0x1234abcd, // thread id
+                      0xdcba4321, // exception code
+                      0xf0e0d0c0, // exception flags
+                      0x0919a9b9c9d9e9f9ULL); // exception address
+  
+  dump.Add(&context);
+  dump.Add(&exception);
+
+  // Add system info.  This is needed as an alternative source for CPU type
+  // information.  Note, that the CPU flags were intentionally skipped from
+  // the context_flags and this alternative source is required.
+  String csd_version(dump, "Service Pack 2");
+  SystemInfo system_info(dump, SystemInfo::windows_x86, csd_version);
+  dump.Add(&system_info);
+  dump.Add(&csd_version);
+
+  dump.Finish();
+
+  string contents;
+  ASSERT_TRUE(dump.GetContents(&contents));
+
+  istringstream minidump_stream(contents);
+  Minidump minidump(minidump_stream);
+  ASSERT_TRUE(minidump.Read());
+  ASSERT_EQ(2U, minidump.GetDirectoryEntryCount());
+
+  MinidumpException *md_exception = minidump.GetException();
+  ASSERT_TRUE(md_exception != NULL);
+
+  uint32_t thread_id;
+  ASSERT_TRUE(md_exception->GetThreadID(&thread_id));
+  ASSERT_EQ(0x1234abcdU, thread_id);
+
+  const MDRawExceptionStream* raw_exception = md_exception->exception();
+  ASSERT_TRUE(raw_exception != NULL);
+  EXPECT_EQ(0xdcba4321, raw_exception->exception_record.exception_code);
+  EXPECT_EQ(0xf0e0d0c0, raw_exception->exception_record.exception_flags);
+  EXPECT_EQ(0x0919a9b9c9d9e9f9ULL,
+            raw_exception->exception_record.exception_address);
+
+  MinidumpContext *md_context = md_exception->GetContext();
+  ASSERT_TRUE(md_context != NULL);
+
+  ASSERT_EQ((uint32_t) MD_CONTEXT_X86, md_context->GetContextCPU());
+  const MDRawContextX86 *md_raw_context = md_context->GetContextX86();
+  ASSERT_TRUE(md_raw_context != NULL);
+
+  // Even though the CPU flags were missing from the context_flags, the
+  // GetContext call above is expected to load the missing CPU flags from the
+  // system info stream and set the CPU type bits in context_flags.
+  ASSERT_EQ((uint32_t) (MD_CONTEXT_X86), md_raw_context->context_flags);
+
+  EXPECT_EQ(0x3ecba80dU, raw_context.edi);
+  EXPECT_EQ(0x382583b9U, raw_context.esi);
+  EXPECT_EQ(0x7fccc03fU, raw_context.ebx);
+  EXPECT_EQ(0xf62f8ec2U, raw_context.edx);
+  EXPECT_EQ(0x46a6a6a8U, raw_context.ecx);
+  EXPECT_EQ(0x6a5025e2U, raw_context.eax);
+  EXPECT_EQ(0xd9fabb4aU, raw_context.ebp);
+  EXPECT_EQ(0x6913f540U, raw_context.eip);
+  EXPECT_EQ(0xbffe6edaU, raw_context.cs);
+  EXPECT_EQ(0xb2ce1e2dU, raw_context.eflags);
+  EXPECT_EQ(0x659caaa4U, raw_context.esp);
+  EXPECT_EQ(0x2e951ef7U, raw_context.ss);
+}
+
+// This test covers a scenario where a dump contains an exception but the
+// context record of the exception is missing the CPU type information in its
+// context_flags.  The dump has no system info stream so it is imposible to
+// deduce the CPU type, hence the context record is unusable.
+TEST(Dump, OneExceptionX86NoCPUFlagsNoSystemInfo) {
+  Dump dump(0, kLittleEndian);
+
+  MDRawContextX86 raw_context;
+  // Intentionally not setting CPU type in the context_flags
+  raw_context.context_flags = 0;
+  raw_context.edi = 0x3ecba80d;
+  raw_context.esi = 0x382583b9;
+  raw_context.ebx = 0x7fccc03f;
+  raw_context.edx = 0xf62f8ec2;
+  raw_context.ecx = 0x46a6a6a8;
+  raw_context.eax = 0x6a5025e2;
+  raw_context.ebp = 0xd9fabb4a;
+  raw_context.eip = 0x6913f540;
+  raw_context.cs = 0xbffe6eda;
+  raw_context.eflags = 0xb2ce1e2d;
+  raw_context.esp = 0x659caaa4;
+  raw_context.ss = 0x2e951ef7;
+  Context context(dump, raw_context);
+
+  Exception exception(dump, context,
+                      0x1234abcd, // thread id
+                      0xdcba4321, // exception code
+                      0xf0e0d0c0, // exception flags
+                      0x0919a9b9c9d9e9f9ULL); // exception address
+  
+  dump.Add(&context);
+  dump.Add(&exception);
+  dump.Finish();
+
+  string contents;
+  ASSERT_TRUE(dump.GetContents(&contents));
+
+  istringstream minidump_stream(contents);
+  Minidump minidump(minidump_stream);
+  ASSERT_TRUE(minidump.Read());
+  ASSERT_EQ(1U, minidump.GetDirectoryEntryCount());
+
+  MinidumpException *md_exception = minidump.GetException();
+  ASSERT_TRUE(md_exception != NULL);
+
+  uint32_t thread_id;
+  ASSERT_TRUE(md_exception->GetThreadID(&thread_id));
+  ASSERT_EQ(0x1234abcdU, thread_id);
+
+  const MDRawExceptionStream* raw_exception = md_exception->exception();
+  ASSERT_TRUE(raw_exception != NULL);
+  EXPECT_EQ(0xdcba4321, raw_exception->exception_record.exception_code);
+  EXPECT_EQ(0xf0e0d0c0, raw_exception->exception_record.exception_flags);
+  EXPECT_EQ(0x0919a9b9c9d9e9f9ULL,
+            raw_exception->exception_record.exception_address);
+
+  // The context record of the exception is unusable because the context_flags
+  // don't have CPU type information and at the same time the minidump lacks
+  // system info stream so it is impossible to deduce the CPU type.
+  MinidumpContext *md_context = md_exception->GetContext();
+  ASSERT_EQ(NULL, md_context);
 }
 
 TEST(Dump, OneExceptionARM) {
@@ -782,9 +1390,9 @@ TEST(Dump, OneExceptionARM) {
   MinidumpException *md_exception = minidump.GetException();
   ASSERT_TRUE(md_exception != NULL);
 
-  u_int32_t thread_id;
+  uint32_t thread_id;
   ASSERT_TRUE(md_exception->GetThreadID(&thread_id));
-  ASSERT_EQ(0x1234abcd, thread_id);
+  ASSERT_EQ(0x1234abcdU, thread_id);
 
   const MDRawExceptionStream* raw_exception = md_exception->exception();
   ASSERT_TRUE(raw_exception != NULL);
@@ -795,10 +1403,10 @@ TEST(Dump, OneExceptionARM) {
 
   MinidumpContext *md_context = md_exception->GetContext();
   ASSERT_TRUE(md_context != NULL);
-  ASSERT_EQ((u_int32_t) MD_CONTEXT_ARM, md_context->GetContextCPU());
+  ASSERT_EQ((uint32_t) MD_CONTEXT_ARM, md_context->GetContextCPU());
   const MDRawContextARM *md_raw_context = md_context->GetContextARM();
   ASSERT_TRUE(md_raw_context != NULL);
-  ASSERT_EQ((u_int32_t) MD_CONTEXT_ARM_INTEGER,
+  ASSERT_EQ((uint32_t) MD_CONTEXT_ARM_INTEGER,
             (md_raw_context->context_flags
              & MD_CONTEXT_ARM_INTEGER));
   EXPECT_EQ(0x3ecba80dU, raw_context.iregs[0]);
@@ -866,9 +1474,9 @@ TEST(Dump, OneExceptionARMOldFlags) {
   MinidumpException *md_exception = minidump.GetException();
   ASSERT_TRUE(md_exception != NULL);
 
-  u_int32_t thread_id;
+  uint32_t thread_id;
   ASSERT_TRUE(md_exception->GetThreadID(&thread_id));
-  ASSERT_EQ(0x1234abcd, thread_id);
+  ASSERT_EQ(0x1234abcdU, thread_id);
 
   const MDRawExceptionStream* raw_exception = md_exception->exception();
   ASSERT_TRUE(raw_exception != NULL);
@@ -879,10 +1487,10 @@ TEST(Dump, OneExceptionARMOldFlags) {
 
   MinidumpContext *md_context = md_exception->GetContext();
   ASSERT_TRUE(md_context != NULL);
-  ASSERT_EQ((u_int32_t) MD_CONTEXT_ARM, md_context->GetContextCPU());
+  ASSERT_EQ((uint32_t) MD_CONTEXT_ARM, md_context->GetContextCPU());
   const MDRawContextARM *md_raw_context = md_context->GetContextARM();
   ASSERT_TRUE(md_raw_context != NULL);
-  ASSERT_EQ((u_int32_t) MD_CONTEXT_ARM_INTEGER,
+  ASSERT_EQ((uint32_t) MD_CONTEXT_ARM_INTEGER,
             (md_raw_context->context_flags
              & MD_CONTEXT_ARM_INTEGER));
   EXPECT_EQ(0x3ecba80dU, raw_context.iregs[0]);
@@ -902,6 +1510,119 @@ TEST(Dump, OneExceptionARMOldFlags) {
   EXPECT_EQ(0xabcd1234U, raw_context.iregs[14]);
   EXPECT_EQ(0x10203040U, raw_context.iregs[15]);
   EXPECT_EQ(0x2e951ef7U, raw_context.cpsr);
+}
+
+TEST(Dump, OneExceptionMIPS) {
+  Dump dump(0, kLittleEndian);
+
+  MDRawContextMIPS raw_context;
+  raw_context.context_flags = MD_CONTEXT_MIPS_INTEGER;
+  raw_context.iregs[0] = 0x3ecba80d;
+  raw_context.iregs[1] = 0x382583b9;
+  raw_context.iregs[2] = 0x7fccc03f;
+  raw_context.iregs[3] = 0xf62f8ec2;
+  raw_context.iregs[4] = 0x46a6a6a8;
+  raw_context.iregs[5] = 0x6a5025e2;
+  raw_context.iregs[6] = 0xd9fabb4a;
+  raw_context.iregs[7] = 0x6913f540;
+  raw_context.iregs[8] = 0xbffe6eda;
+  raw_context.iregs[9] = 0xb2ce1e2d;
+  raw_context.iregs[10] = 0x659caaa4;
+  raw_context.iregs[11] = 0xf0e0d0c0;
+  raw_context.iregs[12] = 0xa9b8c7d6;
+  raw_context.iregs[13] = 0x12345678;
+  raw_context.iregs[14] = 0xabcd1234;
+  raw_context.iregs[15] = 0x10203040;
+  raw_context.iregs[16] = 0xa80d3ecb;
+  raw_context.iregs[17] = 0x83b93825;
+  raw_context.iregs[18] = 0xc03f7fcc;
+  raw_context.iregs[19] = 0x8ec2f62f;
+  raw_context.iregs[20] = 0xa6a846a6;
+  raw_context.iregs[21] = 0x25e26a50;
+  raw_context.iregs[22] = 0xbb4ad9fa;
+  raw_context.iregs[23] = 0xf5406913;
+  raw_context.iregs[24] = 0x6edabffe;
+  raw_context.iregs[25] = 0x1e2db2ce;
+  raw_context.iregs[26] = 0xaaa4659c;
+  raw_context.iregs[27] = 0xd0c0f0e0;
+  raw_context.iregs[28] = 0xc7d6a9b8;
+  raw_context.iregs[29] = 0x56781234;
+  raw_context.iregs[30] = 0x1234abcd;
+  raw_context.iregs[31] = 0x30401020;
+
+  Context context(dump, raw_context);
+
+  Exception exception(dump, context,
+                      0x1234abcd,  // Thread id.
+                      0xdcba4321,  // Exception code.
+                      0xf0e0d0c0,  // Exception flags.
+                      0x0919a9b9); // Exception address.
+  
+  dump.Add(&context);
+  dump.Add(&exception);
+  dump.Finish();
+
+  string contents;
+  ASSERT_TRUE(dump.GetContents(&contents));
+
+  istringstream minidump_stream(contents);
+  Minidump minidump(minidump_stream);
+  ASSERT_TRUE(minidump.Read());
+  ASSERT_EQ(1U, minidump.GetDirectoryEntryCount());
+
+  MinidumpException *md_exception = minidump.GetException();
+  ASSERT_TRUE(md_exception != NULL);
+
+  uint32_t thread_id;
+  ASSERT_TRUE(md_exception->GetThreadID(&thread_id));
+  ASSERT_EQ(0x1234abcdU, thread_id);
+
+  const MDRawExceptionStream* raw_exception = md_exception->exception();
+  ASSERT_TRUE(raw_exception != NULL);
+  EXPECT_EQ(0xdcba4321, raw_exception->exception_record.exception_code);
+  EXPECT_EQ(0xf0e0d0c0, raw_exception->exception_record.exception_flags);
+  EXPECT_EQ(0x0919a9b9U,
+            raw_exception->exception_record.exception_address);
+
+  MinidumpContext* md_context = md_exception->GetContext();
+  ASSERT_TRUE(md_context != NULL);
+  ASSERT_EQ((uint32_t) MD_CONTEXT_MIPS, md_context->GetContextCPU());
+  const MDRawContextMIPS* md_raw_context = md_context->GetContextMIPS();
+  ASSERT_TRUE(md_raw_context != NULL);
+  ASSERT_EQ((uint32_t) MD_CONTEXT_MIPS_INTEGER,
+            (md_raw_context->context_flags & MD_CONTEXT_MIPS_INTEGER));
+  EXPECT_EQ(0x3ecba80dU, raw_context.iregs[0]);
+  EXPECT_EQ(0x382583b9U, raw_context.iregs[1]);
+  EXPECT_EQ(0x7fccc03fU, raw_context.iregs[2]);
+  EXPECT_EQ(0xf62f8ec2U, raw_context.iregs[3]);
+  EXPECT_EQ(0x46a6a6a8U, raw_context.iregs[4]);
+  EXPECT_EQ(0x6a5025e2U, raw_context.iregs[5]);
+  EXPECT_EQ(0xd9fabb4aU, raw_context.iregs[6]);
+  EXPECT_EQ(0x6913f540U, raw_context.iregs[7]);
+  EXPECT_EQ(0xbffe6edaU, raw_context.iregs[8]);
+  EXPECT_EQ(0xb2ce1e2dU, raw_context.iregs[9]);
+  EXPECT_EQ(0x659caaa4U, raw_context.iregs[10]);
+  EXPECT_EQ(0xf0e0d0c0U, raw_context.iregs[11]);
+  EXPECT_EQ(0xa9b8c7d6U, raw_context.iregs[12]);
+  EXPECT_EQ(0x12345678U, raw_context.iregs[13]);
+  EXPECT_EQ(0xabcd1234U, raw_context.iregs[14]);
+  EXPECT_EQ(0x10203040U, raw_context.iregs[15]);
+  EXPECT_EQ(0xa80d3ecbU, raw_context.iregs[16]);
+  EXPECT_EQ(0x83b93825U, raw_context.iregs[17]);
+  EXPECT_EQ(0xc03f7fccU, raw_context.iregs[18]);
+  EXPECT_EQ(0x8ec2f62fU, raw_context.iregs[19]);
+  EXPECT_EQ(0xa6a846a6U, raw_context.iregs[20]);
+  EXPECT_EQ(0x25e26a50U, raw_context.iregs[21]);
+  EXPECT_EQ(0xbb4ad9faU, raw_context.iregs[22]);
+  EXPECT_EQ(0xf5406913U, raw_context.iregs[23]);
+  EXPECT_EQ(0x6edabffeU, raw_context.iregs[24]);
+  EXPECT_EQ(0x1e2db2ceU, raw_context.iregs[25]);
+  EXPECT_EQ(0xaaa4659cU, raw_context.iregs[26]);
+  EXPECT_EQ(0xd0c0f0e0U, raw_context.iregs[27]);
+  EXPECT_EQ(0xc7d6a9b8U, raw_context.iregs[28]);
+  EXPECT_EQ(0x56781234U, raw_context.iregs[29]);
+  EXPECT_EQ(0x1234abcdU, raw_context.iregs[30]);
+  EXPECT_EQ(0x30401020U, raw_context.iregs[31]);
 }
 
 }  // namespace

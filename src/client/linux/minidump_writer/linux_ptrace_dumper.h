@@ -55,8 +55,8 @@ class LinuxPtraceDumper : public LinuxDumper {
   // Implements LinuxDumper::CopyFromProcess().
   // Copies content of |length| bytes from a given process |child|,
   // starting from |src|, into |dest|. This method uses ptrace to extract
-  // the content from the target process.
-  virtual void CopyFromProcess(void* dest, pid_t child, const void* src,
+  // the content from the target process. Always returns true.
+  virtual bool CopyFromProcess(void* dest, pid_t child, const void* src,
                                size_t length);
 
   // Implements LinuxDumper::GetThreadInfoByIndex().
@@ -85,6 +85,15 @@ class LinuxPtraceDumper : public LinuxDumper {
  private:
   // Set to true if all threads of the crashed process are suspended.
   bool threads_suspended_;
+
+  // Read the tracee's registers on kernel with PTRACE_GETREGSET support.
+  // Returns false if PTRACE_GETREGSET is not defined.
+  // Returns true on success.
+  bool ReadRegisterSet(ThreadInfo* info, pid_t tid);
+
+  // Read the tracee's registers on kernel with PTRACE_GETREGS support.
+  // Returns true on success.
+  bool ReadRegisters(ThreadInfo* info, pid_t tid);
 };
 
 }  // namespace google_breakpad

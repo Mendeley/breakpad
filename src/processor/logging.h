@@ -60,11 +60,24 @@
 #include <iostream>
 #include <string>
 
+#include "common/using_std_string.h"
 #include "google_breakpad/common/breakpad_types.h"
 
 #ifdef BP_LOGGING_INCLUDE
 #include BP_LOGGING_INCLUDE
 #endif  // BP_LOGGING_INCLUDE
+
+#ifndef THIRD_PARTY_BREAKPAD_GOOGLE_GLUE_LOGGING_H_
+namespace base_logging {
+
+// The open-source copy of logging.h has diverged from Google's internal copy
+// (temporarily, at least).  To support the transition to structured logging
+// a definition for base_logging::LogMessage is needed, which is a ostream-
+// like object for streaming arguments to construct a log message.
+typedef std::ostream LogMessage;
+
+}  // namespace base_logging
+#endif  // THIRD_PARTY_BREAKPAD_GOOGLE_GLUE_LOGGING_H_
 
 namespace google_breakpad {
 
@@ -81,7 +94,8 @@ class LogStream {
  public:
   enum Severity {
     SEVERITY_INFO,
-    SEVERITY_ERROR
+    SEVERITY_ERROR,
+    SEVERITY_CRITICAL
   };
 
   // Begin logging a message to the stream identified by |stream|, at the
@@ -114,18 +128,18 @@ class LogMessageVoidify {
 
   // This has to be an operator with a precedence lower than << but higher
   // than ?:
-  void operator&(std::ostream &) {}
+  void operator&(base_logging::LogMessage &) {}
 };
 
 // Returns number formatted as a hexadecimal string, such as "0x7b".
-std::string HexString(u_int32_t number);
-std::string HexString(u_int64_t number);
-std::string HexString(int number);
+string HexString(uint32_t number);
+string HexString(uint64_t number);
+string HexString(int number);
 
 // Returns the error code as set in the global errno variable, and sets
 // error_string, a required argument, to a string describing that error
 // code.
-int ErrnoString(std::string *error_string);
+int ErrnoString(string *error_string);
 
 }  // namespace google_breakpad
 
@@ -133,8 +147,20 @@ int ErrnoString(std::string *error_string);
 #define BPLOG_INIT(pargc, pargv)
 #endif  // BPLOG_INIT
 
+#define BPLOG_LAZY_STREAM(stream, condition) \
+    !(condition) ? (void) 0 : \
+                   google_breakpad::LogMessageVoidify() & (BPLOG_ ## stream)
+
+#ifndef BPLOG_MINIMUM_SEVERITY
+#define BPLOG_MINIMUM_SEVERITY SEVERITY_INFO
+#endif
+
+#define BPLOG_LOG_IS_ON(severity) \
+    ((google_breakpad::LogStream::SEVERITY_ ## severity) >= \
+     (google_breakpad::LogStream::BPLOG_MINIMUM_SEVERITY))
+
 #ifndef BPLOG
-#define BPLOG(severity) BPLOG_ ## severity
+#define BPLOG(severity) BPLOG_LAZY_STREAM(severity, BPLOG_LOG_IS_ON(severity))
 #endif  // BPLOG
 
 #ifndef BPLOG_INFO
@@ -155,8 +181,16 @@ int ErrnoString(std::string *error_string);
                         __FILE__, __LINE__)
 #endif  // BPLOG_ERROR
 
+#ifndef BPLOG_CRITICAL
+#ifndef BPLOG_CRITICAL_STREAM
+#define BPLOG_CRITICAL_STREAM std::cerr
+#endif  // BPLOG_CRITICAL_STREAM
+#define BPLOG_CRITICAL google_breakpad::LogStream(BPLOG_CRITICAL_STREAM, \
+                        google_breakpad::LogStream::SEVERITY_CRITICAL, \
+                        __FILE__, __LINE__)
+#endif  // BPLOG_CRITICAL
+
 #define BPLOG_IF(severity, condition) \
-    !(condition) ? (void) 0 : \
-                   google_breakpad::LogMessageVoidify() & BPLOG(severity)
+    BPLOG_LAZY_STREAM(severity, ((condition) && BPLOG_LOG_IS_ON(severity)))
 
 #endif  // PROCESSOR_LOGGING_H__

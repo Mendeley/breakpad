@@ -34,11 +34,11 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
-#include "client/linux/minidump_writer/minidump_extension_linux.h"
+#include "common/scoped_ptr.h"
 #include "google_breakpad/processor/minidump.h"
 #include "processor/logging.h"
-#include "processor/scoped_ptr.h"
 
 namespace {
 
@@ -52,12 +52,22 @@ using google_breakpad::MinidumpAssertion;
 using google_breakpad::MinidumpSystemInfo;
 using google_breakpad::MinidumpMiscInfo;
 using google_breakpad::MinidumpBreakpadInfo;
+using google_breakpad::MinidumpCrashpadInfo;
+
+struct Options {
+  Options()
+      : minidumpPath(), hexdump(false), hexdump_width(16) {}
+
+  string minidumpPath;
+  bool hexdump;
+  unsigned int hexdump_width;
+};
 
 static void DumpRawStream(Minidump *minidump,
-                          u_int32_t stream_type,
+                          uint32_t stream_type,
                           const char *stream_name,
                           int *errors) {
-  u_int32_t length = 0;
+  uint32_t length = 0;
   if (!minidump->SeekToStreamType(stream_type, &length)) {
     return;
   }
@@ -79,7 +89,7 @@ static void DumpRawStream(Minidump *minidump,
     size_t remaining = length - current_offset;
     // Printf requires an int and direct casting from size_t results
     // in compatibility warnings.
-    u_int32_t int_remaining = remaining;
+    uint32_t int_remaining = remaining;
     printf("%.*s", int_remaining, &contents[current_offset]);
     char *next_null = reinterpret_cast<char *>(
         memchr(&contents[current_offset], 0, remaining));
@@ -92,8 +102,9 @@ static void DumpRawStream(Minidump *minidump,
   printf("\n\n");
 }
 
-static bool PrintMinidumpDump(const char *minidump_file) {
-  Minidump minidump(minidump_file);
+static bool PrintMinidumpDump(const Options& options) {
+  Minidump minidump(options.minidumpPath,
+                    options.hexdump);
   if (!minidump.Read()) {
     BPLOG(ERROR) << "minidump.Read() failed";
     return false;
@@ -110,6 +121,9 @@ static bool PrintMinidumpDump(const char *minidump_file) {
     thread_list->Print();
   }
 
+  // It's useful to be able to see the full list of modules here even if it
+  // would cause minidump_stackwalk to fail.
+  MinidumpModuleList::set_max_modules(UINT32_MAX);
   MinidumpModuleList *module_list = minidump.GetModuleList();
   if (!module_list) {
     ++errors;
@@ -172,6 +186,12 @@ static bool PrintMinidumpDump(const char *minidump_file) {
     memory_info_list->Print();
   }
 
+  MinidumpCrashpadInfo *crashpad_info = minidump.GetCrashpadInfo();
+  if (crashpad_info) {
+    // Crashpad info is optional, so don't treat absence as an error.
+    crashpad_info->Print();
+  }
+
   DumpRawStream(&minidump,
                 MD_LINUX_CMD_LINE,
                 "MD_LINUX_CMD_LINE",
@@ -200,15 +220,56 @@ static bool PrintMinidumpDump(const char *minidump_file) {
   return errors == 0;
 }
 
-}  // namespace
+//=============================================================================
+static void
+Usage(int argc, char *argv[], bool error) {
+  FILE *fp = error ? stderr : stdout;
 
-int main(int argc, char **argv) {
-  BPLOG_INIT(&argc, &argv);
+  fprintf(fp,
+          "Usage: %s [options...] <minidump>\n"
+          "Dump data in a minidump.\n"
+          "\n"
+          "Options:\n"
+          "  <minidump> should be a minidump.\n"
+          "  -x:\t Display memory in a hexdump like format\n"
+          "  -h:\t Usage\n",
+          argv[0]);
+}
 
-  if (argc != 2) {
-    fprintf(stderr, "usage: %s <file>\n", argv[0]);
-    return 1;
+//=============================================================================
+static void
+SetupOptions(int argc, char *argv[], Options *options) {
+  int ch;
+
+  while ((ch = getopt(argc, (char * const *)argv, "xh")) != -1) {
+    switch (ch) {
+      case 'x':
+        options->hexdump = true;
+        break;
+      case 'h':
+        Usage(argc, argv, false);
+        exit(0);
+
+      default:
+        Usage(argc, argv, true);
+        exit(1);
+        break;
+    }
   }
 
-  return PrintMinidumpDump(argv[1]) ? 0 : 1;
+  if ((argc - optind) != 1) {
+    fprintf(stderr, "%s: Missing minidump file\n", argv[0]);
+    exit(1);
+  }
+
+  options->minidumpPath = argv[optind];
+}
+
+}  // namespace
+
+int main(int argc, char *argv[]) {
+  Options options;
+  BPLOG_INIT(&argc, &argv);
+  SetupOptions(argc, argv, &options);
+  return PrintMinidumpDump(options) ? 0 : 1;
 }

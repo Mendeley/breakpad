@@ -27,6 +27,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include "client/windows/unittests/exception_handler_test.h"
+
 #include <windows.h>
 #include <dbghelp.h>
 #include <strsafe.h>
@@ -35,12 +37,25 @@
 
 #include <string>
 
-#include "../../../breakpad_googletest_includes.h"
-#include "../../../../common/windows/string_utils-inl.h"
-#include "../../../../google_breakpad/processor/minidump.h"
-#include "../crash_generation/crash_generation_server.h"
-#include "../handler/exception_handler.h"
-#include "dump_analysis.h"  // NOLINT
+#include "breakpad_googletest_includes.h"
+#include "client/windows/crash_generation/crash_generation_server.h"
+#include "client/windows/handler/exception_handler.h"
+#include "client/windows/unittests/dump_analysis.h"  // NOLINT
+#include "common/windows/string_utils-inl.h"
+#include "google_breakpad/processor/minidump.h"
+
+namespace testing {
+
+DisableExceptionHandlerInScope::DisableExceptionHandlerInScope() {
+  catch_exceptions_ = GTEST_FLAG(catch_exceptions);
+  GTEST_FLAG(catch_exceptions) = false;
+}
+
+DisableExceptionHandlerInScope::~DisableExceptionHandlerInScope() {
+  GTEST_FLAG(catch_exceptions) = catch_exceptions_;
+}
+
+}  // namespace testing
 
 namespace {
 
@@ -105,7 +120,7 @@ void ExceptionHandlerTest::SetUp() {
   // THe test case name is exposed to use as a c-style string,
   // But we might be working in UNICODE here on Windows.
   int dwRet = MultiByteToWideChar(CP_ACP, 0, test_info->name(),
-                                  strlen(test_info->name()),
+                                  static_cast<int>(strlen(test_info->name())),
                                   test_name_wide,
                                   MAX_PATH);
   if (!dwRet) {
@@ -232,6 +247,7 @@ TEST_F(ExceptionHandlerTest, InvalidParameterMiniDumpTest) {
   EXPECT_EXIT(DoCrashInvalidParameter(), ::testing::ExitedWithCode(0), "");
   ASSERT_TRUE(!dump_file.empty() && !full_dump_file.empty());
   ASSERT_TRUE(DoesPathExist(dump_file.c_str()));
+  ASSERT_TRUE(DoesPathExist(full_dump_file.c_str()));
 
   // Verify the dump for infos.
   DumpAnalysis mini(dump_file);
@@ -303,6 +319,7 @@ TEST_F(ExceptionHandlerTest, PureVirtualCallMiniDumpTest) {
   EXPECT_EXIT(DoCrashPureVirtualCall(), ::testing::ExitedWithCode(0), "");
   ASSERT_TRUE(!dump_file.empty() && !full_dump_file.empty());
   ASSERT_TRUE(DoesPathExist(dump_file.c_str()));
+  ASSERT_TRUE(DoesPathExist(full_dump_file.c_str()));
 
   // Verify the dump for infos.
   DumpAnalysis mini(dump_file);
@@ -361,6 +378,10 @@ TEST_F(ExceptionHandlerTest, WriteMinidumpTest) {
                            DumpCallback,
                            NULL,
                            ExceptionHandler::HANDLER_ALL);
+
+  // Disable GTest SEH handler
+  testing::DisableExceptionHandlerInScope disable_exception_handler;
+
   ASSERT_TRUE(handler.WriteMinidump());
   ASSERT_FALSE(dump_file.empty());
 
@@ -371,7 +392,112 @@ TEST_F(ExceptionHandlerTest, WriteMinidumpTest) {
   // Read the minidump and verify some info.
   Minidump minidump(minidump_filename);
   ASSERT_TRUE(minidump.Read());
-  //TODO(ted): more comprehensive tests...
+  // TODO(ted): more comprehensive tests...
+}
+
+// Test that an additional memory region can be included in the minidump.
+TEST_F(ExceptionHandlerTest, AdditionalMemory) {
+  SYSTEM_INFO si;
+  GetSystemInfo(&si);
+  const uint32_t kMemorySize = si.dwPageSize;
+
+  // Get some heap memory.
+  uint8_t* memory = new uint8_t[kMemorySize];
+  const uintptr_t kMemoryAddress = reinterpret_cast<uintptr_t>(memory);
+  ASSERT_TRUE(memory);
+
+  // Stick some data into the memory so the contents can be verified.
+  for (uint32_t i = 0; i < kMemorySize; ++i) {
+    memory[i] = i % 255;
+  }
+
+  ExceptionHandler handler(temp_path_,
+                           NULL,
+                           DumpCallback,
+                           NULL,
+                           ExceptionHandler::HANDLER_ALL);
+
+  // Disable GTest SEH handler
+  testing::DisableExceptionHandlerInScope disable_exception_handler;
+
+  // Add the memory region to the list of memory to be included.
+  handler.RegisterAppMemory(memory, kMemorySize);
+  ASSERT_TRUE(handler.WriteMinidump());
+  ASSERT_FALSE(dump_file.empty());
+
+  string minidump_filename;
+  ASSERT_TRUE(WindowsStringUtils::safe_wcstombs(dump_file,
+                                                &minidump_filename));
+
+  // Read the minidump. Ensure that the memory region is present
+  Minidump minidump(minidump_filename);
+  ASSERT_TRUE(minidump.Read());
+
+  MinidumpMemoryList* dump_memory_list = minidump.GetMemoryList();
+  ASSERT_TRUE(dump_memory_list);
+  const MinidumpMemoryRegion* region =
+    dump_memory_list->GetMemoryRegionForAddress(kMemoryAddress);
+  ASSERT_TRUE(region);
+
+  EXPECT_EQ(kMemoryAddress, region->GetBase());
+  EXPECT_EQ(kMemorySize, region->GetSize());
+
+  // Verify memory contents.
+  EXPECT_EQ(0, memcmp(region->GetMemory(), memory, kMemorySize));
+
+  delete[] memory;
+}
+
+// Test that a memory region that was previously registered
+// can be unregistered.
+TEST_F(ExceptionHandlerTest, AdditionalMemoryRemove) {
+  SYSTEM_INFO si;
+  GetSystemInfo(&si);
+  const uint32_t kMemorySize = si.dwPageSize;
+
+  // Get some heap memory.
+  uint8_t* memory = new uint8_t[kMemorySize];
+  const uintptr_t kMemoryAddress = reinterpret_cast<uintptr_t>(memory);
+  ASSERT_TRUE(memory);
+
+  // Stick some data into the memory so the contents can be verified.
+  for (uint32_t i = 0; i < kMemorySize; ++i) {
+    memory[i] = i % 255;
+  }
+
+  ExceptionHandler handler(temp_path_,
+                           NULL,
+                           DumpCallback,
+                           NULL,
+                           ExceptionHandler::HANDLER_ALL);
+
+  // Disable GTest SEH handler
+  testing::DisableExceptionHandlerInScope disable_exception_handler;
+
+  // Add the memory region to the list of memory to be included.
+  handler.RegisterAppMemory(memory, kMemorySize);
+
+  // ...and then remove it
+  handler.UnregisterAppMemory(memory);
+
+  ASSERT_TRUE(handler.WriteMinidump());
+  ASSERT_FALSE(dump_file.empty());
+
+  string minidump_filename;
+  ASSERT_TRUE(WindowsStringUtils::safe_wcstombs(dump_file,
+                                                &minidump_filename));
+
+  // Read the minidump. Ensure that the memory region is not present.
+  Minidump minidump(minidump_filename);
+  ASSERT_TRUE(minidump.Read());
+
+  MinidumpMemoryList* dump_memory_list = minidump.GetMemoryList();
+  ASSERT_TRUE(dump_memory_list);
+  const MinidumpMemoryRegion* region =
+    dump_memory_list->GetMemoryRegionForAddress(kMemoryAddress);
+  EXPECT_FALSE(region);
+
+  delete[] memory;
 }
 
 }  // namespace

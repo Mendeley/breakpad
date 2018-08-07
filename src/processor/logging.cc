@@ -35,16 +35,15 @@
 
 #include <assert.h>
 #include <errno.h>
-#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
+#include <string>
+
+#include "common/stdio_wrapper.h"
+#include "common/using_std_string.h"
 #include "processor/logging.h"
 #include "processor/pathname_stripper.h"
-
-#ifdef _WIN32
-#define snprintf _snprintf
-#endif
 
 namespace google_breakpad {
 
@@ -70,6 +69,9 @@ LogStream::LogStream(std::ostream &stream, Severity severity,
     case SEVERITY_ERROR:
       severity_string = "ERROR";
       break;
+    case SEVERITY_CRITICAL:
+      severity_string = "CRITICAL";
+      break;
   }
 
   stream_ << time_string << ": " << PathnameStripper::File(file) << ":" <<
@@ -80,25 +82,25 @@ LogStream::~LogStream() {
   stream_ << std::endl;
 }
 
-std::string HexString(u_int32_t number) {
+string HexString(uint32_t number) {
   char buffer[11];
   snprintf(buffer, sizeof(buffer), "0x%x", number);
-  return std::string(buffer);
+  return string(buffer);
 }
 
-std::string HexString(u_int64_t number) {
+string HexString(uint64_t number) {
   char buffer[19];
   snprintf(buffer, sizeof(buffer), "0x%" PRIx64, number);
-  return std::string(buffer);
+  return string(buffer);
 }
 
-std::string HexString(int number) {
+string HexString(int number) {
   char buffer[19];
   snprintf(buffer, sizeof(buffer), "0x%x", number);
-  return std::string(buffer);
+  return string(buffer);
 }
 
-int ErrnoString(std::string *error_string) {
+int ErrnoString(string *error_string) {
   assert(error_string);
 
   // strerror isn't necessarily thread-safe.  strerror_r would be preferrable,

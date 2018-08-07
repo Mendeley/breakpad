@@ -27,49 +27,86 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <paths.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include "common/linux/dump_symbols.h"
 
 using google_breakpad::WriteSymbolFile;
+using google_breakpad::WriteSymbolFileHeader;
 
 int usage(const char* self) {
   fprintf(stderr, "Usage: %s [OPTION] <binary-with-debugging-info> "
-          "[directory-for-debug-file]\n\n", self);
+          "[directories-for-debug-file]\n\n", self);
   fprintf(stderr, "Options:\n");
+  fprintf(stderr, "  -i:   Output module header information only.\n");
   fprintf(stderr, "  -c    Do not generate CFI section\n");
+  fprintf(stderr, "  -r    Do not handle inter-compilation unit references\n");
+  fprintf(stderr, "  -v    Print all warnings to stderr\n");
   return 1;
 }
 
 int main(int argc, char **argv) {
-  if (argc < 2 || argc > 4)
+  if (argc < 2)
     return usage(argv[0]);
-
+  bool header_only = false;
   bool cfi = true;
-  if (strcmp("-c", argv[1]) == 0)
-    cfi = false;
-  if (!cfi && argc == 2)
+  bool handle_inter_cu_refs = true;
+  bool log_to_stderr = false;
+  int arg_index = 1;
+  while (arg_index < argc && strlen(argv[arg_index]) > 0 &&
+         argv[arg_index][0] == '-') {
+    if (strcmp("-i", argv[arg_index]) == 0) {
+      header_only = true;
+    } else if (strcmp("-c", argv[arg_index]) == 0) {
+      cfi = false;
+    } else if (strcmp("-r", argv[arg_index]) == 0) {
+      handle_inter_cu_refs = false;
+    } else if (strcmp("-v", argv[arg_index]) == 0) {
+      log_to_stderr = true;
+    } else {
+      printf("2.4 %s\n", argv[arg_index]);
+      return usage(argv[0]);
+    }
+    ++arg_index;
+  }
+  if (arg_index == argc)
     return usage(argv[0]);
-
-  const char *binary;
-  std::string debug_dir;
-  if (cfi) {
-    binary = argv[1];
-    if (argc == 3)
-      debug_dir = argv[2];
-  } else {
-    binary = argv[2];
-    if (argc == 4)
-      debug_dir = argv[3];
+  // Save stderr so it can be used below.
+  FILE* saved_stderr = fdopen(dup(fileno(stderr)), "w");
+  if (!log_to_stderr) {
+    if (freopen(_PATH_DEVNULL, "w", stderr)) {
+      // If it fails, not a lot we can (or should) do.
+      // Add this brace section to silence gcc warnings.
+    }
+  }
+  const char* binary;
+  std::vector<string> debug_dirs;
+  binary = argv[arg_index];
+  for (int debug_dir_index = arg_index + 1;
+       debug_dir_index < argc;
+       ++debug_dir_index) {
+    debug_dirs.push_back(argv[debug_dir_index]);
   }
 
-  if (!WriteSymbolFile(binary, debug_dir, cfi, std::cout)) {
-    fprintf(stderr, "Failed to write symbol file.\n");
-    return 1;
+  if (header_only) {
+    if (!WriteSymbolFileHeader(binary, std::cout)) {
+      fprintf(saved_stderr, "Failed to process file.\n");
+      return 1;
+    }
+  } else {
+    SymbolData symbol_data = cfi ? ALL_SYMBOL_DATA : NO_CFI;
+    google_breakpad::DumpOptions options(symbol_data, handle_inter_cu_refs);
+    if (!WriteSymbolFile(binary, debug_dirs, options, std::cout)) {
+      fprintf(saved_stderr, "Failed to write symbol file.\n");
+      return 1;
+    }
   }
 
   return 0;

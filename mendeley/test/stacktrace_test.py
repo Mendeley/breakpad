@@ -52,7 +52,7 @@ def main():
             print('No minidump file created', file=sys.stderr)
             sys.exit(1)
 
-        subprocess.call([stackwalk_path, '-m', '-e', '%s --symbols ' % os.path.realpath(__file__), dump_files[0]], stdout=stackfile, stderr=minidump_log)
+        subprocess.call([stackwalk_path, '-m', dump_files[0], '.'], stdout=stackfile, stderr=minidump_log)
         stackfile.seek(0)
         stack_content = stackfile.read()
 

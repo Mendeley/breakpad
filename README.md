@@ -1,60 +1,82 @@
 # Breakpad
 
-This is a fork of [Google Breakpad](https://code.google.com/p/google-breakpad/),
-a multi-platform crash reporting system, which is used by [Mendeley Desktop](http://www.mendeley.com/download-mendeley-desktop)
-under Windows, Mac and Linux.
+Breakpad is a set of client and server components which implement a
+crash-reporting system.
 
-Mendeley's additions to breakpad include:
+* [Homepage](https://chromium.googlesource.com/breakpad/breakpad/)
+* [Documentation](https://chromium.googlesource.com/breakpad/breakpad/+/master/docs/)
+* [Bugs](https://bugs.chromium.org/p/google-breakpad/)
+* Discussion/Questions: [google-breakpad-discuss@googlegroups.com](https://groups.google.com/d/forum/google-breakpad-discuss)
+* Developer/Reviews: [google-breakpad-dev@googlegroups.com](https://groups.google.com/d/forum/google-breakpad-dev)
+* Tests: [![Build Status](https://travis-ci.org/google/breakpad.svg?branch=master)](https://travis-ci.org/google/breakpad) [![Build status](https://ci.appveyor.com/api/projects/status/eguv4emv2rhq68u2?svg=true)](https://ci.appveyor.com/project/vapier/breakpad)
+* Coverage [![Coverity Status](https://scan.coverity.com/projects/9215/badge.svg)](https://scan.coverity.com/projects/google-breakpad)
 
-* A CMake-based build system for the crash capturing client library, debug symbol
-extraction and stacktrace output (minidump_stackwalk) tools.
+## Getting started (from master)
 
-* Support in minidump_stackwalk for fetching debug symbols from arbitrary sources
-by invoking a user-provided command instead of looking in a specific local filesystem
-directory. We use this to fetch debug symbols on-demand from an archive hosted in S3.
+1.  First, [download depot_tools](http://dev.chromium.org/developers/how-tos/install-depot-tools)
+    and ensure that they’re in your `PATH`.
 
-* A python script which fetches debug symbols from a symbol server with a given HTTP URL
+2.  Create a new directory for checking out the source code (it must be named
+    breakpad).
 
-* A simple multi-platform end-to-end test that builds a buggy app with the crash capturing library
-installed, extracts debug symbols from it, runs the test app and symbolizes the resulting
-crash dump.
+    ```sh
+    mkdir breakpad && cd breakpad
+    ```
 
-* Compatibility with C++11
+3.  Run the `fetch` tool from depot_tools to download all the source repos.
 
-## Building Breakpad
+    ```sh
+    fetch breakpad
+    cd src
+    ```
 
-````
-git clone https://github.com/Mendeley/breakpad.git
-mkdir breakpad-build
-cd breakpad-build
-cmake ../breakpad/mendeley
-make
-````
+4.  Build the source.
 
-## Usage
+    ```sh
+    ./configure && make
+    ```
 
-The overall flow for capturing crashes and debugging them as follows:
+    You can also cd to another directory and run configure from there to build
+    outside the source tree.
 
-1. Build the breakpad tools and libraries
-2. Link the breakpad library with your application
-3. Early in your app's startup code, create an instance of `google_breakpad::ExceptionHandler`. This
-   is defined separately for each platform in `client/<platform>/handler/exception_handler.h`
-4. When the app crashes, it will write a .dmp file to the directory specified when the `ExceptionHandler`
-   object was created.
-5. When building a release build of your app, run the dump_syms tool on the generated DLLs and binaries
-   to produce .sym files which contain mappings from program locations to source locations.
-6. Upload the .sym files to a location which is accessible via a HTTP URL. See [this StackOverflow comment](http://stackoverflow.com/questions/5278997/setting-up-a-public-or-private-symbol-server-over-http/23614715#23614715) for details of the expected structure of the symbol server
-7. When your app crashes on a user's system, get the .dmp file and use minidump_stackwalk to produce a stacktrace
-   from the .dmp file.
+    This will build the processor tools (`src/processor/minidump_stackwalk`,
+    `src/processor/minidump_dump`, etc), and when building on Linux it will
+    also build the client libraries and some tools
+    (`src/tools/linux/dump_syms/dump_syms`,
+    `src/tools/linux/md2core/minidump-2-core`, etc).
 
-You can also debug the .dmp files in Visual Studio on Windows.
+5.  Optionally, run tests.
 
-## Getting a stacktrace from a minidump
+    ```sh
+    make check
+    ```
 
-When you have a .dmp file captured by the breakpad library after an application crashes and have
-uploaded it to a location accessible via a HTTP URL, you can use the minidump_stackwalk tool to extract
-a stack trace from the minidump.
+6.  Optionally, install the built libraries
 
-````
-./minidump_stackwalk -m <path to .dmp file> -e '../breakpad/mendeley/fetch-symbols.py -s <URL of your symbol server>'
-````
+    ```sh
+    make install
+    ```
+
+If you need to reconfigure your build be sure to run `make distclean` first.
+
+To update an existing checkout to a newer revision, you can
+`git pull` as usual, but then you should run `gclient sync` to ensure that the
+dependent repos are up-to-date.
+
+## To request change review
+
+1.  Follow the steps above to get the source and build it.
+
+2.  Make changes. Build and test your changes.
+    For core code like processor use methods above.
+    For linux/mac/windows, there are test targets in each project file.
+
+3.  Commit your changes to your local repo and upload them to the server.
+    http://dev.chromium.org/developers/contributing-code
+    e.g. `git commit ... && git cl upload ...`
+    You will be prompted for credential and a description.
+
+4.  At https://chromium-review.googlesource.com/ you'll find your issue listed;
+    click on it, then “Add reviewer”, and enter in the code reviewer. Depending
+    on your settings, you may not see an email, but the reviewer has been
+    notified with google-breakpad-dev@googlegroups.com always CC’d.

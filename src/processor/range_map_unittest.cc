@@ -37,10 +37,9 @@
 
 #include "processor/range_map-inl.h"
 
+#include "common/scoped_ptr.h"
 #include "processor/linked_ptr.h"
 #include "processor/logging.h"
-#include "processor/scoped_ptr.h"
-
 
 namespace {
 
@@ -167,8 +166,10 @@ static bool RetrieveTest(TestMap *range_map, const RangeTest *range_test) {
       linked_ptr<CountedObject> object;
       AddressType retrieved_base = AddressType();
       AddressType retrieved_size = AddressType();
+      AddressType retrieved_delta = AddressType();
       bool retrieved = range_map->RetrieveRange(address, &object,
                                                 &retrieved_base,
+                                                &retrieved_delta,
                                                 &retrieved_size);
 
       bool observed_result = retrieved && object->id() == range_test->id;
@@ -210,10 +211,12 @@ static bool RetrieveTest(TestMap *range_map, const RangeTest *range_test) {
 
       linked_ptr<CountedObject> nearest_object;
       AddressType nearest_base = AddressType();
+      AddressType nearest_delta = AddressType();
       AddressType nearest_size = AddressType();
       bool retrieved_nearest = range_map->RetrieveNearestRange(address,
                                                                &nearest_object,
                                                                &nearest_base,
+                                                               &nearest_delta,
                                                                &nearest_size);
 
       // When checking one greater than the high side, RetrieveNearestRange
@@ -275,7 +278,8 @@ static bool RetrieveIndexTest(TestMap *range_map, int set) {
   int object_count = range_map->GetCount();
   for (int object_index = 0; object_index < object_count; ++object_index) {
     AddressType base;
-    if (!range_map->RetrieveRangeAtIndex(object_index, &object, &base, NULL)) {
+    if (!range_map->RetrieveRangeAtIndex(object_index, &object, &base,
+                                         NULL /* delta */, NULL /* size */)) {
       fprintf(stderr, "FAILED: RetrieveRangeAtIndex set %d index %d, "
               "expected success, observed failure\n",
               set, object_index);
@@ -315,7 +319,8 @@ static bool RetrieveIndexTest(TestMap *range_map, int set) {
 
   // Make sure that RetrieveRangeAtIndex doesn't allow lookups at indices that
   // are too high.
-  if (range_map->RetrieveRangeAtIndex(object_count, &object, NULL, NULL)) {
+  if (range_map->RetrieveRangeAtIndex(object_count, &object, NULL /* base */,
+                                      NULL /* delta */, NULL /* size */)) {
     fprintf(stderr, "FAILED: RetrieveRangeAtIndex set %d index %d (too large), "
             "expected failure, observed success\n",
             set, object_count);
@@ -344,7 +349,8 @@ static bool RetriveAtIndexTest2() {
   int object_count = range_map->GetCount();
   for (int object_index = 0; object_index < object_count; ++object_index) {
     AddressType base;
-    if (!range_map->RetrieveRangeAtIndex(object_index, &object, &base, NULL)) {
+    if (!range_map->RetrieveRangeAtIndex(object_index, &object, &base,
+                                         NULL /* delta */, NULL /* size */)) {
       fprintf(stderr, "FAILED: RetrieveAtIndexTest2 index %d, "
               "expected success, observed failure\n", object_index);
       return false;
