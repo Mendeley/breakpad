@@ -14,10 +14,9 @@ target_link_libraries(buggy_app ${BREAKPAD_LIBS})
 # debug info in order to successfully extract function
 # names from it
 if (UNIX)
+  target_link_libraries(buggy_app pthread)
   set_target_properties(buggy_app PROPERTIES COMPILE_FLAGS -g)
-endif()
 
-if (UNIX)
   # the test currently relies on minidump_stackwalk which is currently only built
   # under Linux/Mac
   add_test(stacktrace_test python ${CMAKE_CURRENT_SOURCE_DIR}/stacktrace_test.py
